@@ -32,6 +32,7 @@ The local service caches external Codex data independently of device pulses. USB
 2. **CoreS3 interface:** reusable 320 × 240 visual components, clear interaction states, touch cancellation and device testing.
 3. **Conversation:** the official Sign in with ChatGPT OAuth flow, protected local account storage, model discovery and bounded multi-turn text context are implemented. A user must complete browser consent and select a listed model before natural voice replies are enabled. No live sign-in or inference has run. Subscription sign-in does not expose ChatGPT history or memory; billed text API inference remains disabled.
 4. **Gmail:** separate Google OAuth with read-only scopes, metadata cache, user-controlled access to message bodies and quiet notifications. Requires user account consent and Google API configuration.
+   **Calendar:** a separate read-only Google grant, bounded upcoming-event cache and local voice answers are implemented. Live browser consent and event verification remain outstanding.
 5. **Codex and projects:** approved project registry, read-only status and task summaries through documented interfaces, plus explicit approval handling for consequential actions.
 6. **Desktop polish:** account, conversation, device, notification and diagnostic views; reliable background service lifetime.
 7. **Other services:** optional calendar, weather and reminders after their separate authorisations.
@@ -52,6 +53,10 @@ The Windows dashboard has a ChatGPT page with a system-browser sign-in button, s
 ## Gmail and alerts
 
 The optional Gmail connector uses a separate Google Desktop OAuth flow and requests only `gmail.metadata`. It can cache an unread count and up to ten recent message headers; it cannot read bodies or use Gmail search with this scope. Metadata polling is independent of CoreS3 pulses. The desktop page displays the cached headers. A voice request for email uses only the cached snapshot and local Windows speech, so message metadata is not sent to Cedar or the ChatGPT text provider. Gmail browser consent has not happened; a Google Desktop OAuth client ID and possibly Google's restricted-scope verification are outstanding. The alert store currently covers low battery only. The alert UI firmware compiled, flashed with verified hash, and reconnected via Wi-Fi; the new alert screen itself has not yet been checked by touch on the physical display.
+
+## Calendar
+
+The Calendar page can use the same Google Desktop OAuth client ID after the Calendar API is enabled, but asks for its own `calendar.events.readonly` grant. The backend refreshes up to 20 events from the primary calendar in the next 48 hours without depending on device pulses. It requests only summary, visibility and start/end fields; private titles are masked. Spoken answers use the cached snapshot and local Windows speech. The CoreS3 receives only an event count. Unit tests and dashboard startup pass, but no OAuth consent or live event request has happened yet. The user's client ID and browser consent are needed for that check.
 
 ## Approved project registry
 

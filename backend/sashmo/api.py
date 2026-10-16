@@ -16,6 +16,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
+from .calendar_worker import CalendarWorker
 from .conversation import ConversationProvider
 from .gmail import GmailWorker
 from .projects import ProjectRegistry
@@ -60,10 +61,13 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
     async def lifespan(_: FastAPI):
         worker = QuotaWorker(store, config.codex_poll_seconds) if start_worker else None
         gmail_worker = GmailWorker(store) if start_worker else None
+        calendar_worker = CalendarWorker(store) if start_worker else None
         if worker:
             await worker.start()
         if gmail_worker:
             await gmail_worker.start()
+        if calendar_worker:
+            await calendar_worker.start()
         try:
             yield
         finally:
@@ -71,6 +75,8 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
                 await worker.stop()
             if gmail_worker:
                 await gmail_worker.stop()
+            if calendar_worker:
+                await calendar_worker.stop()
 
     app = FastAPI(title="Sashmo", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.store = store

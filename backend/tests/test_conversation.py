@@ -55,3 +55,18 @@ def test_mail_answers_use_cached_metadata_and_local_voice_only(tmp_path):
     assert provider.sensitive_output is True
     assert provider.last_source == "local"
     assert client.requests == []
+
+
+def test_calendar_answers_stay_local_and_do_not_invoke_plan(tmp_path):
+    from datetime import datetime, timedelta
+    tomorrow = (datetime.now().astimezone() + timedelta(days=1)).date().isoformat()
+    class State:
+        calendar_snapshot = {"events": [{"title": "Example appointment", "start": tomorrow,
+                                          "end": tomorrow, "all_day": True}]}
+    client = FakePlanClient()
+    provider = ConversationProvider(tmp_path / "projects.local.json", client=client, state=State())
+    reply = asyncio.run(provider.respond("What's on tomorrow?", None, False))
+    assert "Example appointment" in reply
+    assert provider.sensitive_output is True
+    assert provider.last_source == "local"
+    assert client.requests == []

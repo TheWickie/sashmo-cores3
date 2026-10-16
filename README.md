@@ -2,7 +2,7 @@
 
 Sashmo is an open-source voice and status companion for the M5Stack CoreS3 and a Windows PC. The CoreS3 provides the touchscreen, microphone, speaker and battery-powered Wi-Fi connection. A local Windows service retrieves reported Codex usage and handles read-only voice questions; a desktop dashboard starts the service and shows device status.
 
-This is an active hardware project. Push-to-talk, quota display, battery telemetry and the dashboard work. Optional ChatGPT plan conversation is prepared but awaits account sign-in and live verification. Gmail and other personal integrations are planned. See [Phase 2 status](docs/PHASE2.md) for verified behaviour and release blockers.
+This is an active hardware project. Push-to-talk, quota display, battery telemetry and the dashboard work. Optional ChatGPT plan conversation is prepared but awaits account sign-in and live verification. Gmail metadata and Calendar upcoming-event connections are prepared but await Google consent and live verification. See [Phase 2 status](docs/PHASE2.md) for verified behaviour and release blockers.
 
 ## Requirements
 
@@ -51,6 +51,8 @@ Double-click `Sashmo.cmd` to open the Windows dashboard. It starts or connects t
 Use the Projects page to add Git repositories that Sashmo may inspect. Its read-only status view shows branch, uncommitted changes and last commit. Approved paths stay in the ignored `projects.local.json`; no project is inspected before you add it.
 
 The Gmail page supports a separate Google Desktop OAuth client ID and browser consent. The current connector requests Gmail metadata only and shows recent sender, subject, date and unread count. It does not read bodies, search, send or modify mail. Google classifies this scope as restricted; public distribution may require Google verification. Gmail remains disconnected until you provide a client ID and complete consent.
+
+The Calendar page uses a Google Desktop OAuth client ID and its own browser consent, separate from Gmail. Enable the Google Calendar API in the same Google Cloud project, then enter the client ID and select **Connect Calendar**. Sashmo requests `calendar.events.readonly` and caches up to 20 upcoming events from the primary calendar for the next 48 hours. It requests no descriptions, locations, attendees or conference details; private event titles are masked. Event data stays on the PC and is spoken with local Windows speech. The CoreS3 receives only an event count. Calendar remains disconnected until the client ID is configured and browser consent succeeds. The event view and spoken answers have not yet been verified with a live Google account.
 
 Tap the microphone control on the CoreS3 and speak within the listening window. The current read-only questions cover quota, reset time, time, date and connection status. Tap the quota card for details and tap again to return. Voice and status use Wi-Fi; USB is needed for charging, flashing and optional serial diagnostics only.
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from datetime import datetime, timedelta
 from pathlib import Path
 import re
 import time
@@ -83,10 +84,40 @@ class ConversationProvider:
                 return f"The latest inbox message is from {sender}, about {subject}. I can only read headers right now."
         return f"You have {count} unread inbox messages." if count is not None else "Gmail status is unavailable."
 
+    def _calendar_answer(self, transcript: str) -> str | None:
+        utterance = transcript.casefold()
+        if not re.search(r"\b(calendar|schedule|tomorrow|meeting|appointments?)\b", utterance):
+            return None
+        self.sensitive_output = True
+        snapshot = getattr(self.state, "calendar_snapshot", None)
+        if snapshot is None:
+            return "Calendar is not connected. You can connect it in Sashmo on Windows."
+        if getattr(self.state, "calendar_error", None):
+            return "Calendar is temporarily unavailable. Check Sashmo on Windows."
+        target = (datetime.now().astimezone() + timedelta(days=1)).date() if "tomorrow" in utterance else None
+        events = []
+        for item in snapshot.get("events") or []:
+            raw = str(item.get("start") or "")
+            try:
+                start = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                local = start.astimezone() if start.tzinfo else start
+                day = local.date()
+                when = "all day" if item.get("all_day") else local.strftime("%I:%M %p").lstrip("0")
+            except ValueError:
+                continue
+            if target is None or day == target:
+                events.append(f"{str(item.get('title') or 'Event')[:80]} at {when}")
+        if not events:
+            return "You have no events tomorrow." if target else "No upcoming events are in the cached calendar window."
+        day_label = "Tomorrow" if target else "Coming up"
+        return day_label + ": " + "; ".join(events[:2]) + ("; and more." if len(events) > 2 else ".")
+
     async def respond(self, transcript: str, quota: dict[str, Any] | None, connected: bool) -> str:
         async with self._lock:
             self.sensitive_output = False
             local = self._mail_answer(transcript)
+            if local is None:
+                local = self._calendar_answer(transcript)
             if local is None:
                 local = self._local_command(transcript, quota, connected)
             if local is None:

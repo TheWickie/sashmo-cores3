@@ -31,6 +31,8 @@ class StateStore:
         self.notifications: list[dict[str, str]] = []
         self.gmail_snapshot: dict[str, Any] | None = None
         self.gmail_error: str | None = "Not connected"
+        self.calendar_snapshot: dict[str, Any] | None = None
+        self.calendar_error: str | None = "Not connected"
         self.telemetry_path = telemetry_path
 
     def update(self, quota: dict[str, Any] | None, connected: bool, error: str | None) -> None:
@@ -56,6 +58,7 @@ class StateStore:
             "notification_count": len(self.notifications),
             "notifications": self.notifications[-3:],
             "gmail_unread_count": (self.gmail_snapshot or {}).get("unread_count"),
+            "calendar_event_count": len((self.calendar_snapshot or {}).get("events") or []),
         }
 
     def update_gmail(self, snapshot: dict[str, Any] | None, error: str | None) -> None:
@@ -68,6 +71,17 @@ class StateStore:
             new_count = None
         self.gmail_error = error
         if new_count != previous_count:
+            self.version += 1
+
+    def update_calendar(self, snapshot: dict[str, Any] | None, error: str | None) -> None:
+        previous = (self.calendar_snapshot or {}).get("events")
+        if snapshot is not None:
+            self.calendar_snapshot = snapshot
+        elif error == "Not connected":
+            self.calendar_snapshot = None
+        self.calendar_error = error
+        current = (self.calendar_snapshot or {}).get("events")
+        if current != previous:
             self.version += 1
 
     def notify(self, key: str, title: str, summary: str) -> None:
@@ -131,6 +145,8 @@ class StateStore:
             "notifications": {"count": len(self.notifications), "items": self.notifications},
             "gmail": {"connected": self.gmail_snapshot is not None and self.gmail_error is None,
                       "error": self.gmail_error, "snapshot": self.gmail_snapshot},
+            "calendar": {"connected": self.calendar_snapshot is not None and self.calendar_error is None,
+                         "error": self.calendar_error, "snapshot": self.calendar_snapshot},
         }
 
 

@@ -218,7 +218,7 @@ class GmailClient:
         params = {
             "client_id": client_id, "redirect_uri": redirect_uri,
             "response_type": "code", "scope": SCOPE,
-            "access_type": "offline", "state": state,
+            "access_type": "offline", "prompt": "consent", "state": state,
             "code_challenge": challenge, "code_challenge_method": "S256",
         }
         threading.Thread(target=server.serve_forever, daemon=True).start()

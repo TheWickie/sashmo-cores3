@@ -29,6 +29,7 @@ if str(DESKTOP) not in sys.path:
     sys.path.insert(0, str(DESKTOP))
 from sashmo.siwc import SIWCClient, WindowsTokenStore
 from sashmo.gmail import GmailClient, GmailTokenStore
+from sashmo.calendar import CalendarClient, CalendarTokenStore
 from service_host import (autostart_enabled as backend_autostart_enabled,
                           send_command as send_service_command,
                           set_autostart as set_backend_autostart,
@@ -53,6 +54,14 @@ BORDER = "#2a3b50"
 
 def load_config() -> dict:
     return json.loads(CONFIG.read_text(encoding="utf-8"))
+
+
+def save_config(config: dict) -> None:
+    """Keep the private configuration valid across interrupted GUI writes."""
+    temp = ROOT / "work" / "config.local.json.tmp"
+    temp.parent.mkdir(parents=True, exist_ok=True)
+    temp.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    os.replace(temp, CONFIG)
 
 
 def _local_datetime(value: str | None) -> str:
@@ -168,6 +177,8 @@ class SashmoDesktop(tk.Tk):
         self.account_client = SIWCClient(WindowsTokenStore())
         self.gmail_client = GmailClient(GmailTokenStore())
         self.gmail_busy = False
+        self.calendar_client = CalendarClient(CalendarTokenStore())
+        self.calendar_busy = False
         self.account_choices: dict[str, str] = {}
         self.available_models: dict[str, str] = {}
         self.last_message = "Starting Sashmo"
@@ -207,7 +218,8 @@ class SashmoDesktop(tk.Tk):
         self._label(sidebar, "WORKSPACE", 9, MUTED, "bold").pack(anchor="w", padx=18, pady=(22, 9))
         self.nav_buttons: dict[str, tk.Button] = {}
         for name, title in (("overview", "Overview"), ("alerts", "Alerts"),
-                            ("accounts", "ChatGPT"), ("gmail", "Gmail"), ("projects", "Projects"),
+                            ("accounts", "ChatGPT"), ("gmail", "Gmail"),
+                            ("calendar", "Calendar"), ("projects", "Projects"),
                             ("settings", "Settings"), ("diagnostics", "Diagnostics")):
             button = self._button(sidebar, title, lambda page=name: self._show_page(page))
             button.configure(anchor="w", padx=18)
@@ -223,6 +235,7 @@ class SashmoDesktop(tk.Tk):
         self._build_alerts()
         self._build_accounts()
         self._build_gmail()
+        self._build_calendar()
         self._build_projects()
         self._build_settings()
         self._build_diagnostics()
@@ -441,7 +454,7 @@ class SashmoDesktop(tk.Tk):
             try:
                 config = load_config()
                 config["google_oauth_client_id"] = client_id
-                CONFIG.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+                save_config(config)
                 attempt = self.gmail_client.begin_authorization(client_id)
                 if not webbrowser.open(attempt.url):
                     attempt.close()
@@ -462,6 +475,87 @@ class SashmoDesktop(tk.Tk):
                 self.results.put(("gmail_action", "Local Gmail account removed"))
             except Exception as exc:
                 self.results.put(("gmail_action", f"Could not remove Gmail account: {exc}"))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _build_calendar(self) -> None:
+        page = self._page("calendar")
+        self._heading(page, "Calendar", "Optional, read-only upcoming events")
+        card = Card(page)
+        card.pack(fill="x")
+        self._label(card, "GOOGLE DESKTOP OAUTH", 10, MUTED, "bold").pack(anchor="w", padx=24, pady=(20, 8))
+        self._label(card, "Enable the Google Calendar API for a Desktop OAuth client. "
+                    "You may use the same client ID as Gmail, but consent is separate.",
+                    10, TEXT, wraplength=610, justify="left").pack(anchor="w", padx=24)
+        self.calendar_client_var = tk.StringVar(value=load_config().get("google_oauth_client_id", ""))
+        tk.Entry(card, textvariable=self.calendar_client_var, width=65, bg=PANEL_LIGHT, fg=TEXT,
+                 insertbackground=TEXT, relief="flat", font=("Segoe UI", 10)).pack(anchor="w", padx=24, pady=(12, 12))
+        row = tk.Frame(card, bg=PANEL)
+        row.pack(fill="x", padx=24, pady=(0, 18))
+        self._button(row, "Connect Calendar", self._sign_in_calendar, True).pack(side="left")
+        self._button(row, "Forget on this PC", self._forget_calendar).pack(side="left", padx=10)
+        self.calendar_status = self._label(page, "Calendar not connected", 11, MUTED)
+        self.calendar_status.pack(anchor="w", pady=(16, 12))
+        self.calendar_view = tk.Text(page, bg=PANEL, fg=TEXT, insertbackground=TEXT, relief="flat",
+                                     font=("Segoe UI", 10), wrap="word", padx=18, pady=14)
+        self.calendar_view.pack(fill="both", expand=True)
+        self.calendar_view.configure(state="disabled")
+        self._label(page, "The first connection shows up to 20 events from your primary calendar "
+                    "over the next 48 hours. Event descriptions and attendees are not requested.",
+                    10, MUTED, wraplength=620, justify="left").pack(anchor="w", pady=(12, 0))
+
+    def _render_calendar(self) -> None:
+        calendar = (self.status or {}).get("calendar") or {}
+        snapshot = calendar.get("snapshot") or {}
+        if calendar.get("connected"):
+            self.calendar_status.configure(text=f"Connected · {len(snapshot.get('events') or [])} upcoming event(s)",
+                                           fg=ACCENT)
+        else:
+            self.calendar_status.configure(text=calendar.get("error") or "Calendar not connected", fg=MUTED)
+        lines = []
+        for item in snapshot.get("events") or []:
+            start = item.get("start") or "Time unavailable"
+            lines.append(f"{item.get('title') or 'Event'}\n{start}"
+                         f"{' · all day' if item.get('all_day') else ''}")
+        content = "\n\n".join(lines) if lines else "No upcoming events available."
+        self.calendar_view.configure(state="normal")
+        self.calendar_view.delete("1.0", "end")
+        self.calendar_view.insert("1.0", content)
+        self.calendar_view.configure(state="disabled")
+
+    def _sign_in_calendar(self) -> None:
+        if self.calendar_busy:
+            return
+        client_id = self.calendar_client_var.get().strip()
+        if not client_id.endswith(".apps.googleusercontent.com"):
+            self.calendar_status.configure(text="Enter a Google Desktop OAuth client ID first", fg=AMBER)
+            return
+        self.calendar_busy = True
+        self.calendar_status.configure(text="Waiting for Google browser sign-in…", fg=AMBER)
+        def work() -> None:
+            try:
+                config = load_config()
+                config["google_oauth_client_id"] = client_id
+                save_config(config)
+                attempt = self.calendar_client.begin_authorization(client_id)
+                if not webbrowser.open(attempt.url):
+                    attempt.close()
+                    raise RuntimeError("Could not open the system browser")
+                self.calendar_client.finish_authorization(attempt)
+                self.results.put(("calendar_action", "Calendar connected; waiting for the next background refresh"))
+            except Exception as exc:
+                self.results.put(("calendar_action", f"Calendar connection failed: {exc}"))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _forget_calendar(self) -> None:
+        if self.calendar_busy:
+            return
+        self.calendar_busy = True
+        def work() -> None:
+            try:
+                self.calendar_client.forget()
+                self.results.put(("calendar_action", "Local Calendar account removed"))
+            except Exception as exc:
+                self.results.put(("calendar_action", f"Could not remove Calendar account: {exc}"))
         threading.Thread(target=work, daemon=True).start()
 
     def _render_alerts(self) -> None:
@@ -686,6 +780,8 @@ class SashmoDesktop(tk.Tk):
             self._render_alerts()
         elif page == "gmail":
             self._render_gmail()
+        elif page == "calendar":
+            self._render_calendar()
 
     def _action(self, action) -> None:
         if self.action_busy or self.closing:
@@ -744,6 +840,7 @@ class SashmoDesktop(tk.Tk):
         self._render_status(error)
         self._render_alerts()
         self._render_gmail()
+        self._render_calendar()
         if result:
             self.recovery_delay = 2.0
             self.next_recovery_at = 0.0
@@ -780,6 +877,10 @@ class SashmoDesktop(tk.Tk):
                     self.gmail_busy = False
                     self.gmail_status.configure(text=item[1], fg=ACCENT if "failed" not in item[1]
                                                 and "Could not" not in item[1] else AMBER)
+                elif item[0] == "calendar_action":
+                    self.calendar_busy = False
+                    self.calendar_status.configure(text=item[1], fg=ACCENT if "failed" not in item[1]
+                                                   and "Could not" not in item[1] else AMBER)
         except queue.Empty:
             pass
         self.after(100, self._drain_results)
@@ -881,7 +982,7 @@ class SashmoDesktop(tk.Tk):
                 raise ValueError("Codex refresh must be between 30 and 3600 seconds")
             config = load_config()
             config["codex_poll_seconds"] = interval
-            CONFIG.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+            save_config(config)
             set_autostart(self.autostart_var.get())
             try:
                 managed = bool(send_service_command("status").get("managed"))
