@@ -56,6 +56,8 @@ The Gmail page supports a separate Google Desktop OAuth client ID and browser co
 
 The Calendar page uses a Google Desktop OAuth client ID and its own browser consent, separate from Gmail. Enable the Google Calendar API in the same Google Cloud project, then enter the client ID and select **Connect Calendar**. Sashmo requests `calendar.events.readonly` and caches up to 20 upcoming events from the primary calendar for the next 48 hours. It requests no descriptions, locations, attendees or conference details; private event titles are masked. Event data stays on the PC and is spoken with local Windows speech. The CoreS3 receives only an event count. Calendar remains disconnected until the client ID is configured and browser consent succeeds. The event view and spoken answers have not yet been verified with a live Google account.
 
+When Gmail or Calendar is connected, the CoreS3 idle screen shows compact unread-mail and upcoming-event counts. Disconnected services do not display a zero count.
+
 Tap the microphone control on the CoreS3 and speak within the listening window. The current read-only questions cover quota, reset time, time, date and connection status. Tap the quota card for details and tap again to return. Voice and status use Wi-Fi; USB is needed for charging, flashing and optional serial diagnostics only.
 
 If the PC's LAN address or service port changes, update `config.local.json` and reflash the CoreS3. Reserving the PC's address in the home router is a practical way to keep the current connection stable. Hostname or mDNS discovery is a future improvement.

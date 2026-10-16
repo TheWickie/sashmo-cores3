@@ -58,6 +58,8 @@ The optional Gmail connector uses a separate Google Desktop OAuth flow and reque
 
 The Calendar page can use the same Google Desktop OAuth client ID after the Calendar API is enabled, but asks for its own `calendar.events.readonly` grant. The backend refreshes up to 20 events from the primary calendar in the next 48 hours without depending on device pulses. It requests only summary, visibility and start/end fields; private titles are masked. Spoken answers use the cached snapshot and local Windows speech. The CoreS3 receives only an event count. Unit tests and dashboard startup pass, but no OAuth consent or live event request has happened yet. The user's client ID and browser consent are needed for that check.
 
+The CoreS3 firmware now renders connected Gmail/Calendar counts on the idle screen, omitting them when disconnected. This build compiled, flashed to COM4 with hash verification, and resumed authenticated Wi-Fi pulses after reboot. The new count layout has not yet been visually checked on the physical screen.
+
 ## Approved project registry
 
 The dashboard's Projects page lets the local user choose Git repository folders. The private `projects.local.json` allowlist is ignored by Git. The authenticated service reports only the approved display name, branch, clean/dirty state and last commit identifier/time; it does not send paths or source contents to the device. No project is inspected until it is explicitly added. The Overview can count recent Codex task states through read-only App Server methods, using generic labels and no task content. Voice access to these task summaries remains future work.

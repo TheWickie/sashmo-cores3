@@ -26,6 +26,8 @@ QuotaWindow windows[2];
 int windowCount = 0;
 int resetCredits = -1;
 int notificationCount = 0;
+int mailUnreadCount = -1;
+int calendarEventCount = -1;
 String notificationTitle;
 String notificationSummary;
 int snapshotVersion = -1;
@@ -144,6 +146,10 @@ void drawIdle() {
   M5.Display.setCursor(12, 224);
   M5.Display.setTextColor(notificationCount > 0 ? 0xFBE0 : 0xBDF7, 0x0841);
   M5.Display.printf("ALERTS %d", notificationCount);
+  M5.Display.setTextColor(0xBDF7, 0x0841);
+  M5.Display.setCursor(205, 224);
+  if (mailUnreadCount >= 0) M5.Display.printf("MAIL %d ", mailUnreadCount);
+  if (calendarEventCount >= 0) M5.Display.printf("CAL %d", calendarEventCount);
 
   M5.Display.fillCircle(160, 194, 30, 0x25F6);
   M5.Display.drawCircle(160, 194, 31, 0xBDF7);
@@ -322,6 +328,14 @@ void parsePulse(const String& payload) {
       notificationTitle = String(item["title"] | "");
       notificationSummary = String(item["summary"] | "");
     }
+    dirty = true;
+  }
+  if (doc.containsKey("gmail_unread_count")) {
+    mailUnreadCount = doc["gmail_unread_count"].is<int>() ? doc["gmail_unread_count"].as<int>() : -1;
+    dirty = true;
+  }
+  if (doc.containsKey("calendar_event_count")) {
+    calendarEventCount = doc["calendar_event_count"].is<int>() ? doc["calendar_event_count"].as<int>() : -1;
     dirty = true;
   }
   snapshotVersion = newVersion;

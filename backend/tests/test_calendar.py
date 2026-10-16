@@ -131,3 +131,17 @@ def test_forget_clears_local_grant_and_cache():
     client.forget()
     assert store.load() is None
     assert client._cache is None
+
+
+def test_calendar_pulse_count_clears_on_connection_loss():
+    from sashmo.state import StateStore
+
+    state = StateStore()
+    state.update_calendar({"events": [{"title": "Event"}]}, None)
+    connected_version = state.version
+    assert state.pulse(-1)["calendar_event_count"] == 1
+
+    state.update_calendar(None, "Calendar unavailable; reconnect in the dashboard")
+    assert state.version > connected_version
+    assert state.pulse(connected_version)["calendar_event_count"] is None
+    assert state.status()["calendar"]["connected"] is False

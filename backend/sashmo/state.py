@@ -61,7 +61,8 @@ class StateStore:
             "notification_count": len(self.notifications),
             "notifications": self.notifications[-3:],
             "gmail_unread_count": (self.gmail_snapshot or {}).get("unread_count"),
-            "calendar_event_count": len((self.calendar_snapshot or {}).get("events") or []),
+            "calendar_event_count": (len((self.calendar_snapshot or {}).get("events") or [])
+                                     if self.calendar_snapshot is not None and self.calendar_error is None else None),
         }
 
     def update_gmail(self, snapshot: dict[str, Any] | None, error: str | None) -> None:
@@ -78,13 +79,14 @@ class StateStore:
 
     def update_calendar(self, snapshot: dict[str, Any] | None, error: str | None) -> None:
         previous = (self.calendar_snapshot or {}).get("events")
+        previous_error = self.calendar_error
         if snapshot is not None:
             self.calendar_snapshot = snapshot
         elif error == "Not connected":
             self.calendar_snapshot = None
         self.calendar_error = error
         current = (self.calendar_snapshot or {}).get("events")
-        if current != previous:
+        if current != previous or error != previous_error:
             self.version += 1
 
     def update_codex_sessions(self, sessions: list[dict[str, Any]] | None,
