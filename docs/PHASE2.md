@@ -18,7 +18,8 @@ This document distinguishes code, desktop observations and physical device tests
 - [x] Add configurable brightness and low-battery visual warning.
 - [x] Flash the revised firmware and confirm USB and battery power transitions again.
 - [x] Boot the CoreS3 with USB disconnected, then verify Wi-Fi, dashboard connection, touch, microphone and speaker.
-- [ ] Interrupt home Wi-Fi and the desktop service; verify offline feedback and recovery on battery.
+- [x] Restart the desktop service while the CoreS3 is on battery; the dashboard restarted it and fresh Wi-Fi pulses resumed.
+- [ ] Interrupt home Wi-Fi; verify offline feedback and recovery on battery.
 - [ ] Record a real discharge profile in active and idle use. Do not estimate runtime from battery capacity alone.
 
 The local service caches external Codex data independently of device pulses. USB, battery and low-battery pulse intervals are configured in the ignored local config. A stable PC address or a future verified discovery mechanism is needed; mDNS is not yet implemented.
