@@ -1,0 +1,1 @@
+"""Sashmo desktop service."""

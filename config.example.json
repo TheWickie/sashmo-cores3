@@ -1,0 +1,16 @@
+{
+  "bind_host": "192.168.1.10",
+  "port": 8765,
+  "wifi_ssid": "YOUR_WIFI_NAME",
+  "device_token": "replace-with-a-random-secret-of-at-least-32-characters",
+  "codex_poll_seconds": 300,
+  "usb_pulse_seconds": 30,
+  "battery_pulse_seconds": 60,
+  "low_power_pulse_seconds": 300,
+  "usb_brightness": 180,
+  "battery_brightness": 130,
+  "battery_idle_brightness": 75,
+  "low_battery_brightness": 45,
+  "battery_dim_after_seconds": 45,
+  "low_battery_percent": 15
+}

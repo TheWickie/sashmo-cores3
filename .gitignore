@@ -1,0 +1,16 @@
+wifipassword.txt
+openAIAPIKey.txt
+WifiStatus/wifi_credentials.h
+WifiStatus/build/
+.arduino-data/
+.arduino-downloads/
+.arduino-user/
+build/
+tools/
+work/
+.venv/
+config.local.json
+firmware/Sashmo/config_private.h
+*.log
+__pycache__/
+.pytest_cache/

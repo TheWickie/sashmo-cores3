@@ -1,0 +1,10 @@
+# Technical decisions
+
+1. **Codex limits:** Use the installed App Server `account/read` and `account/rateLimits/read` protocol. Display the actual plan and usage windows reported by the signed-in account; never fabricate a five-hour limit or translate plan codes.
+2. **Refresh cadence:** Cache a versioned quota snapshot on the desktop. Device pulses default to 30 seconds on USB and 60 seconds on battery; App Server refresh is independent at 300 seconds or on a rate-limit update notification.
+3. **Audio:** Optional API-key configuration enables `gpt-4o-mini-transcribe` for short WAV requests and `gpt-4o-mini-tts` with Cedar for spoken replies. These API calls may be billed. Fall back to local Windows recognition and System.Speech. Normalize API WAV streaming headers before device playback. No API key is embedded on the device.
+4. **Voice permissions:** v0.1 executes only read-only requests from a bounded parser. Unknown speech receives a capabilities response.
+5. **LAN security:** Bind to the desktop's private IPv4 address and authenticate both routes with a random device token. Keep private files out of Git. No internet-facing deployment or port forwarding.
+6. **Toolchain:** Support an Arduino CLI executable in `tools/` or on `PATH` with the official M5Stack board package plus M5Unified/M5GFX. Keep build artifacts ignored by Git.
+7. **Windows GUI:** Use standard-library Tkinter for a native desktop dashboard without an additional GUI runtime. It launches the backend when absent, attaches to an existing instance, exposes safe diagnostics, and can optionally register itself for current-user Windows sign-in startup. Device telemetry rides on the existing authenticated pulse without changing its quota version.
+8. **Future conversation:** OpenAI documents ChatGPT plan usage for locally hosted open-source apps via a separate Sign in with ChatGPT OAuth flow. This is a viable provider candidate, not an entitlement check or a reuse of Codex's stored sign-in. Keep conversation disabled until an explicit Sashmo OAuth sign-in and supported inference flow are implemented. A billed API inference provider would require separate authorization.
