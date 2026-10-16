@@ -4,6 +4,22 @@ Sashmo is an open-source voice and status companion for the M5Stack CoreS3 and a
 
 This is an active hardware project. Push-to-talk, quota display, battery telemetry and the dashboard work. Optional ChatGPT plan conversation is prepared but awaits account sign-in and live verification. Gmail metadata and Calendar upcoming-event connections are prepared but await Google consent and live verification. See [Phase 2 status](docs/PHASE2.md) for verified behaviour and release blockers.
 
+## Easy mode: set up with Codex
+
+On a Windows PC, plug in a CoreS3, set its DIN base switch to **ON**, then paste this prompt into your own Codex task:
+
+```text
+Set up Sashmo from https://github.com/TheWickie/sashmo-cores3 on this Windows PC for my M5Stack CoreS3. Read README.md and AGENTS.md first. Clone into a folder I choose (default: Documents\Sashmo), or continue an existing checkout without overwriting my changes.
+
+Install the documented Python and Arduino CLI dependencies. Find this PC's private LAN IPv4 address and the CoreS3's actual USB serial port; do not assume COM4. Create the ignored local configuration with backend/setup_config.py. Help me enter my Wi-Fi name and password into the private local files without printing either one in chat, command output, logs, or Git. Keep the generated device token private too.
+
+Run the backend tests, build the firmware, flash only the identified CoreS3, and start the independent Windows backend and dashboard. Check that the device connects over Wi-Fi and reports a recent pulse, then guide me through a microphone and speaker test. Tell me what you verified and what still needs my physical input.
+
+Leave paid OpenAI speech, ChatGPT plan conversation, Gmail, and Calendar disconnected unless I separately choose to set them up and complete their sign-in or billing steps. Do not enable billed text inference, expose the backend to the internet, or commit any credential or generated firmware file.
+```
+
+Codex will still need your help to enter Wi-Fi credentials locally, identify the connected device, and confirm the physical voice test. The manual steps below remain available if you prefer to set it up yourself.
+
 ## Requirements
 
 - An M5Stack CoreS3 with DIN base and battery. Set the DIN base power switch to **ON**.
