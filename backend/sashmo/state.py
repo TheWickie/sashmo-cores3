@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .codex_rpc import CodexAppServer
+from .codex_sessions import recent_sessions
 from .quota import normalize_quota
 
 
@@ -33,6 +34,8 @@ class StateStore:
         self.gmail_error: str | None = "Not connected"
         self.calendar_snapshot: dict[str, Any] | None = None
         self.calendar_error: str | None = "Not connected"
+        self.codex_sessions: list[dict[str, Any]] = []
+        self.codex_sessions_error: str | None = "Waiting for Codex"
         self.telemetry_path = telemetry_path
 
     def update(self, quota: dict[str, Any] | None, connected: bool, error: str | None) -> None:
@@ -83,6 +86,12 @@ class StateStore:
         current = (self.calendar_snapshot or {}).get("events")
         if current != previous:
             self.version += 1
+
+    def update_codex_sessions(self, sessions: list[dict[str, Any]] | None,
+                              error: str | None) -> None:
+        if sessions is not None:
+            self.codex_sessions = sessions
+        self.codex_sessions_error = error
 
     def notify(self, key: str, title: str, summary: str) -> None:
         """Replace one local alert by stable key; do not include credentials or transcripts."""
@@ -147,6 +156,7 @@ class StateStore:
                       "error": self.gmail_error, "snapshot": self.gmail_snapshot},
             "calendar": {"connected": self.calendar_snapshot is not None and self.calendar_error is None,
                          "error": self.calendar_error, "snapshot": self.calendar_snapshot},
+            "codex_sessions": {"error": self.codex_sessions_error, "items": self.codex_sessions},
         }
 
 
@@ -179,6 +189,11 @@ class QuotaWorker:
                     account = await rpc.request("account/read")
                     limits = await rpc.request("account/rateLimits/read", {"excludeResetCreditDetails": True})
                     self.state.update(normalize_quota(account, limits), True, None)
+                    try:
+                        sessions = await asyncio.wait_for(recent_sessions(rpc, limit=5), timeout=30)
+                        self.state.update_codex_sessions([item.as_dict() for item in sessions], None)
+                    except (Exception, asyncio.TimeoutError):
+                        self.state.update_codex_sessions(None, "Recent Codex task status unavailable")
                     try:
                         await asyncio.wait_for(rpc.updated.wait(), timeout=self.poll_seconds)
                     except asyncio.TimeoutError:

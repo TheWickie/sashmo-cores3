@@ -8,6 +8,8 @@
 
 The backend opens one persistent JSON-lines `codex app-server --stdio` process, initializes it, and requests `account/read` and `account/rateLimits/read`. It normalizes `rateLimitsByLimitId` first, with legacy `rateLimits` as fallback. It responds to `account/rateLimits/updated` by refreshing, and also refreshes every `codex_poll_seconds`. On failure it retains the last quota snapshot while flagging the Codex connection as stale and retrying with exponential backoff. No OAuth token or account secret is accessed directly.
 
+The same process reads up to five recent task states through `thread/list` and `thread/turns/list`. The stored and displayed projection has only generic labels, states and update timestamps. It omits task titles, prompts, paths, IDs and turn content. A task-list failure does not interrupt quota refresh.
+
 Only actual reported usage windows are included. Durations and reset timestamps come from App Server response fields; reset time is converted to the desktop's local time zone. The firmware displays at most two windows in the Codex bucket. Reset credits and other buckets remain in the backend snapshot for future UI work.
 
 ## Device API

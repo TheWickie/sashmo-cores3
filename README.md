@@ -48,6 +48,8 @@ Change `COM4` to the detected device port. The script creates a private firmware
 
 Double-click `Sashmo.cmd` to open the Windows dashboard. It starts or connects to an independent local service host. The Overview shows reported Codex quota, the last CoreS3 check-in, battery, charging, Wi-Fi signal and voice readiness. Settings includes the Codex refresh interval and backend startup at Windows sign-in. Diagnostics shows service output without credentials or transcripts. **Closing the dashboard leaves the backend running.** The host restarts a crashed backend; use the dashboard's Stop service control when you explicitly want to stop it.
 
+The Overview also shows a count of recent Codex task states from the documented App Server read methods. These generic summaries contain no task title, prompt, working directory or project path.
+
 Use the Projects page to add Git repositories that Sashmo may inspect. Its read-only status view shows branch, uncommitted changes and last commit. Approved paths stay in the ignored `projects.local.json`; no project is inspected before you add it.
 
 The Gmail page supports a separate Google Desktop OAuth client ID and browser consent. The current connector requests Gmail metadata only and shows recent sender, subject, date and unread count. It does not read bodies, search, send or modify mail. Google classifies this scope as restricted; public distribution may require Google verification. Gmail remains disconnected until you provide a client ID and complete consent.

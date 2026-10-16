@@ -306,7 +306,9 @@ class SashmoDesktop(tk.Tk):
         self.codex_state = self._label(codex_card, "Checking Codex", 12, TEXT)
         self.codex_state.pack(anchor="w", padx=23)
         self.codex_updated = self._label(codex_card, "Last quota update: —", 10, MUTED)
-        self.codex_updated.pack(anchor="w", padx=23, pady=(4, 18))
+        self.codex_updated.pack(anchor="w", padx=23, pady=(4, 4))
+        self.codex_tasks = self._label(codex_card, "Recent Codex tasks: —", 10, MUTED)
+        self.codex_tasks.pack(anchor="w", padx=23, pady=(0, 18))
 
     def _build_settings(self) -> None:
         page = self._page("settings")
@@ -901,6 +903,7 @@ class SashmoDesktop(tk.Tk):
             self.voice_state.configure(text="Desktop service unavailable")
             self.codex_state.configure(text="Service unavailable")
             self.codex_updated.configure(text="Last quota update: —")
+            self.codex_tasks.configure(text="Recent Codex tasks: —")
             self.diagnostic_summary.configure(text=f"Service unavailable ({error or 'no response'}). {self.last_message}")
             return
         status = self.status
@@ -931,6 +934,13 @@ class SashmoDesktop(tk.Tk):
                                    f"Codex unavailable · {codex.get('error') or 'retrying'}",
                                    fg=ACCENT if codex.get("connected") else AMBER)
         self.codex_updated.configure(text=f"Last quota update: {_local_datetime(codex.get('last_updated_local'))}")
+        sessions = status.get("codex_sessions") or {}
+        if sessions.get("error"):
+            self.codex_tasks.configure(text="Recent Codex tasks: unavailable")
+        else:
+            items = sessions.get("items") or []
+            active = sum(item.get("state") == "in_progress" for item in items)
+            self.codex_tasks.configure(text=f"Recent Codex tasks: {active} active · {len(items)} listed")
 
         device = status.get("device") or {}
         recent = bool(device.get("connected_recently"))
