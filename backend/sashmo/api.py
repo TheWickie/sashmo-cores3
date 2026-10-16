@@ -46,7 +46,8 @@ class Config:
 
 
 def create_app(config: Config, *, start_worker: bool = True, state: StateStore | None = None) -> FastAPI:
-    store = state or StateStore()
+    telemetry_path = Path(__file__).resolve().parents[2] / "work" / "battery-history.csv"
+    store = state or StateStore(telemetry_path=telemetry_path if start_worker else None)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):

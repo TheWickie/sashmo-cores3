@@ -22,6 +22,8 @@ This document distinguishes code, desktop observations and physical device tests
 - [ ] Interrupt home Wi-Fi; verify offline feedback and recovery on battery.
 - [ ] Record a real discharge profile in active and idle use. Do not estimate runtime from battery capacity alone.
 
+The desktop service now appends authenticated device pulses to the ignored `work/battery-history.csv` with UTC time, charge percentage, charging, USB power and Wi-Fi signal. This prepares a measured discharge test; it does not establish runtime while the device remains plugged in.
+
 The local service caches external Codex data independently of device pulses. USB, battery and low-battery pulse intervals are configured in the ignored local config. A stable PC address or a future verified discovery mechanism is needed; mDNS is not yet implemented.
 
 ## Next milestones

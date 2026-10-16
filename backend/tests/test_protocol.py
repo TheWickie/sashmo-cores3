@@ -1,3 +1,5 @@
+import csv
+
 from fastapi.testclient import TestClient
 
 from sashmo.api import Config, create_app
@@ -39,3 +41,24 @@ def test_status_reports_authenticated_device_telemetry_without_changing_quota_ve
         assert status["device"]["charging"] is True
         assert status["device"]["usb_powered"] is True
         assert status["device"]["wifi_rssi"] == -51
+
+
+def test_battery_history_records_authenticated_pulses_only(tmp_path):
+    history = tmp_path / "battery-history.csv"
+    state = StateStore(telemetry_path=history)
+    app = create_app(Config("192.168.1.10", 8765, "x" * 32), start_worker=False, state=state)
+    with TestClient(app) as client:
+        assert client.get("/v1/pulse?battery=70").status_code == 401
+        assert not history.exists()
+        headers = {"X-Sashmo-Token": "x" * 32}
+        assert client.get("/v1/pulse?battery=70&charging=0&usb=0&wifi_rssi=-64",
+                          headers=headers).status_code == 200
+        assert client.get("/v1/pulse?battery=69&charging=0&usb=0&wifi_rssi=-65",
+                          headers=headers).status_code == 200
+    with history.open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    assert len(rows) == 2
+    assert [row["battery_percent"] for row in rows] == ["70", "69"]
+    assert all(row["usb_powered"] == "False" for row in rows)
+    assert all(set(row) == {"observed_at_utc", "battery_percent", "charging",
+                            "usb_powered", "wifi_rssi"} for row in rows)

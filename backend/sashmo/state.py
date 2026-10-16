@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from .codex_rpc import CodexAppServer
@@ -11,7 +13,7 @@ from .quota import normalize_quota
 
 
 class StateStore:
-    def __init__(self) -> None:
+    def __init__(self, telemetry_path: Path | None = None) -> None:
         self.version = 0
         self.quota: dict[str, Any] | None = None
         self.codex_connected = False
@@ -25,6 +27,7 @@ class StateStore:
         self.device_wifi_rssi: int | None = None
         self.voice_state = "idle"
         self.last_voice_local: str | None = None
+        self.telemetry_path = telemetry_path
 
     def update(self, quota: dict[str, Any] | None, connected: bool, error: str | None) -> None:
         if (quota, connected, error) != (self.quota, self.codex_connected, self.error):
@@ -55,6 +58,19 @@ class StateStore:
         self.device_charging = charging
         self.device_usb_powered = usb
         self.device_wifi_rssi = wifi_rssi if wifi_rssi is not None and -120 <= wifi_rssi <= 0 else None
+        if self.telemetry_path is not None:
+            try:
+                self.telemetry_path.parent.mkdir(parents=True, exist_ok=True)
+                new_file = not self.telemetry_path.exists()
+                with self.telemetry_path.open("a", newline="", encoding="utf-8") as stream:
+                    writer = csv.writer(stream)
+                    if new_file:
+                        writer.writerow(("observed_at_utc", "battery_percent", "charging", "usb_powered", "wifi_rssi"))
+                    writer.writerow((self.device_last_seen.isoformat(timespec="seconds"),
+                                     self.device_battery_percent, self.device_charging,
+                                     self.device_usb_powered, self.device_wifi_rssi))
+            except OSError:
+                pass
 
     def status(self) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
