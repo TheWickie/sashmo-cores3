@@ -125,6 +125,29 @@ def test_oauth_requires_metadata_scope_and_refresh_token():
     assert not client.configured()
 
 
+def test_desktop_secret_is_used_for_exchange_and_renewal():
+    forms = []
+    def handle(request):
+        if request.method == "POST":
+            form = parse_qs(request.content.decode())
+            forms.append(form)
+            assert form["client_secret"] == ["test-secret"]
+            if form["grant_type"] == ["authorization_code"]:
+                return httpx.Response(200, json={"access_token": "access", "refresh_token": "refresh",
+                                                 "scope": SCOPE, "expires_in": 0})
+            return httpx.Response(200, json={"access_token": "renewed", "expires_in": 3600})
+        if request.url.path.endswith("INBOX"):
+            return httpx.Response(200, json={"messagesUnread": 0})
+        return httpx.Response(200, json={"messages": []})
+    store = MemoryStore()
+    client = GmailClient(store, httpx.Client(transport=httpx.MockTransport(handle)),
+                         client_secret="test-secret")
+    client.finish_authorization(attempt_with({"state": "expected-state", "code": "code"}))
+    assert store.data["client_secret"] == "test-secret"
+    assert client.poll(force=True)["unread_count"] == 0
+    assert [form["grant_type"][0] for form in forms] == ["authorization_code", "refresh_token"]
+
+
 def test_pkce_and_loopback_parameters():
     client = GmailClient(MemoryStore())
     attempt = client.begin_authorization("desktop.apps.googleusercontent.com")

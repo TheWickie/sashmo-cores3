@@ -189,9 +189,10 @@ class SashmoDesktop(tk.Tk):
         self.results: queue.Queue[tuple] = queue.Queue()
         self.status: dict | None = None
         self.account_client = SIWCClient(WindowsTokenStore())
-        self.gmail_client = GmailClient(GmailTokenStore())
+        self.google_secret_var = tk.StringVar(value=load_config().get("google_oauth_client_secret", ""))
+        self.gmail_client = GmailClient(GmailTokenStore(), client_secret=self.google_secret_var.get())
         self.gmail_busy = False
-        self.calendar_client = CalendarClient(CalendarTokenStore())
+        self.calendar_client = CalendarClient(CalendarTokenStore(), client_secret=self.google_secret_var.get())
         self.calendar_busy = False
         self.account_choices: dict[str, str] = {}
         self.available_models: dict[str, str] = {}
@@ -423,6 +424,9 @@ class SashmoDesktop(tk.Tk):
         self.gmail_client_var = tk.StringVar(value=load_config().get("google_oauth_client_id", ""))
         tk.Entry(card, textvariable=self.gmail_client_var, width=65, bg=PANEL_LIGHT, fg=TEXT,
                  insertbackground=TEXT, relief="flat", font=("Segoe UI", 10)).pack(anchor="w", padx=24, pady=(12, 12))
+        self._label(card, "Desktop client secret (if Google requires it)", 10, MUTED).pack(anchor="w", padx=24)
+        tk.Entry(card, textvariable=self.google_secret_var, width=65, show="*", bg=PANEL_LIGHT, fg=TEXT,
+                 insertbackground=TEXT, relief="flat", font=("Segoe UI", 10)).pack(anchor="w", padx=24, pady=(8, 12))
         row = tk.Frame(card, bg=PANEL)
         row.pack(fill="x", padx=24, pady=(0, 18))
         self._button(row, "Connect Gmail", self._sign_in_gmail, True).pack(side="left")
@@ -464,6 +468,7 @@ class SashmoDesktop(tk.Tk):
         if self.gmail_busy:
             return
         client_id = self.gmail_client_var.get().strip()
+        secret = self.google_secret_var.get().strip()
         if not client_id.endswith(".apps.googleusercontent.com"):
             self.gmail_status.configure(text="Enter a Google Desktop OAuth client ID first", fg=AMBER)
             return
@@ -471,7 +476,9 @@ class SashmoDesktop(tk.Tk):
         self.gmail_status.configure(text="Waiting for Google browser sign-in…", fg=AMBER)
         def work() -> None:
             try:
-                update_config({"google_oauth_client_id": client_id})
+                update_config({"google_oauth_client_id": client_id,
+                               "google_oauth_client_secret": secret})
+                self.gmail_client.client_secret = secret
                 attempt = self.gmail_client.begin_authorization(client_id)
                 if not webbrowser.open(attempt.url):
                     attempt.close()
@@ -506,6 +513,9 @@ class SashmoDesktop(tk.Tk):
         self.calendar_client_var = tk.StringVar(value=load_config().get("google_oauth_client_id", ""))
         tk.Entry(card, textvariable=self.calendar_client_var, width=65, bg=PANEL_LIGHT, fg=TEXT,
                  insertbackground=TEXT, relief="flat", font=("Segoe UI", 10)).pack(anchor="w", padx=24, pady=(12, 12))
+        self._label(card, "Desktop client secret (if Google requires it)", 10, MUTED).pack(anchor="w", padx=24)
+        tk.Entry(card, textvariable=self.google_secret_var, width=65, show="*", bg=PANEL_LIGHT, fg=TEXT,
+                 insertbackground=TEXT, relief="flat", font=("Segoe UI", 10)).pack(anchor="w", padx=24, pady=(8, 12))
         row = tk.Frame(card, bg=PANEL)
         row.pack(fill="x", padx=24, pady=(0, 18))
         self._button(row, "Connect Calendar", self._sign_in_calendar, True).pack(side="left")
@@ -546,6 +556,7 @@ class SashmoDesktop(tk.Tk):
         if self.calendar_busy:
             return
         client_id = self.calendar_client_var.get().strip()
+        secret = self.google_secret_var.get().strip()
         if not client_id.endswith(".apps.googleusercontent.com"):
             self.calendar_status.configure(text="Enter a Google Desktop OAuth client ID first", fg=AMBER)
             return
@@ -553,7 +564,9 @@ class SashmoDesktop(tk.Tk):
         self.calendar_status.configure(text="Waiting for Google browser sign-in…", fg=AMBER)
         def work() -> None:
             try:
-                update_config({"google_oauth_client_id": client_id})
+                update_config({"google_oauth_client_id": client_id,
+                               "google_oauth_client_secret": secret})
+                self.calendar_client.client_secret = secret
                 attempt = self.calendar_client.begin_authorization(client_id)
                 if not webbrowser.open(attempt.url):
                     attempt.close()

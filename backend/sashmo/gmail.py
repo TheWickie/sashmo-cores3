@@ -191,9 +191,10 @@ class GmailClient:
     """Metadata-only Gmail client; callers decide when to poll or show mail."""
 
     def __init__(self, store: GmailTokenStore, http: httpx.Client | None = None,
-                 *, min_poll_seconds: float = 120) -> None:
+                 *, min_poll_seconds: float = 120, client_secret: str = "") -> None:
         self.store = store
         self.http = http or httpx.Client(timeout=15, follow_redirects=False)
+        self.client_secret = client_secret
         self.min_poll_seconds = max(30, min_poll_seconds)
         self._cache: dict[str, Any] | None = None
         self._cache_at = 0.0
@@ -255,11 +256,14 @@ class GmailClient:
             raise GmailError("Gmail sign-in was declined or cancelled")
         if not params.get("code"):
             raise GmailError("Google did not return an authorization code")
-        tokens = self._token_request({
+        form = {
             "client_id": attempt.client_id, "code": params["code"],
             "code_verifier": attempt.verifier, "redirect_uri": attempt.redirect_uri,
             "grant_type": "authorization_code",
-        })
+        }
+        if self.client_secret:
+            form["client_secret"] = self.client_secret
+        tokens = self._token_request(form)
         if SCOPE not in str(tokens.get("scope", "")).split():
             raise GmailError("Gmail metadata permission was not granted")
         if not all(isinstance(tokens.get(key), str) and tokens[key]
@@ -267,13 +271,16 @@ class GmailClient:
             raise GmailError("Google did not return a renewable Gmail session")
         with self._lock:
             with self._store_locked():
-                self.store.save({
+                account = {
                     "client_id": attempt.client_id,
                     "access_token": tokens["access_token"],
                     "refresh_token": tokens["refresh_token"],
                     "scope": SCOPE,
                     "expires_at": time.time() + int(tokens.get("expires_in", 3600)),
-                })
+                }
+                if self.client_secret:
+                    account["client_secret"] = self.client_secret
+                self.store.save(account)
             self._cache = None
 
     def forget(self) -> None:
@@ -290,11 +297,14 @@ class GmailClient:
                 if not data or data.get("scope") != SCOPE:
                     raise GmailError("Connect Gmail in the desktop app first")
                 if float(data.get("expires_at", 0)) - time.time() < 120:
-                    tokens = self._token_request({
+                    form = {
                         "client_id": data["client_id"],
                         "refresh_token": data["refresh_token"],
                         "grant_type": "refresh_token",
-                    })
+                    }
+                    if data.get("client_secret"):
+                        form["client_secret"] = data["client_secret"]
+                    tokens = self._token_request(form)
                     if not isinstance(tokens.get("access_token"), str):
                         raise GmailError("Gmail session could not be renewed; sign in again")
                     if tokens.get("scope") and SCOPE not in str(tokens["scope"]).split():

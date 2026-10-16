@@ -182,9 +182,10 @@ class CalendarClient:
     """Calendar OAuth and bounded upcoming-event cache; no background loop."""
 
     def __init__(self, store: CalendarTokenStore, http: httpx.Client | None = None,
-                 *, min_poll_seconds: float = 120) -> None:
+                 *, min_poll_seconds: float = 120, client_secret: str = "") -> None:
         self.store = store
         self.http = http or httpx.Client(timeout=15, follow_redirects=False)
+        self.client_secret = client_secret
         self.min_poll_seconds = max(30, min_poll_seconds)
         self._cache: dict[str, Any] | None = None
         self._cache_at = 0.0
@@ -243,11 +244,14 @@ class CalendarClient:
             raise CalendarError("Calendar sign-in was declined or cancelled")
         if not params.get("code"):
             raise CalendarError("Google did not return an authorization code")
-        tokens = self._token_request({"client_id": attempt.client_id,
-                                      "code": params["code"],
-                                      "code_verifier": attempt.verifier,
-                                      "redirect_uri": attempt.redirect_uri,
-                                      "grant_type": "authorization_code"})
+        form = {"client_id": attempt.client_id,
+                "code": params["code"],
+                "code_verifier": attempt.verifier,
+                "redirect_uri": attempt.redirect_uri,
+                "grant_type": "authorization_code"}
+        if self.client_secret:
+            form["client_secret"] = self.client_secret
+        tokens = self._token_request(form)
         if SCOPE not in str(tokens.get("scope", "")).split():
             raise CalendarError("Calendar read permission was not granted")
         if not all(isinstance(tokens.get(key), str) and tokens[key]
@@ -255,11 +259,14 @@ class CalendarClient:
             raise CalendarError("Google did not return a renewable Calendar session")
         with self._lock:
             with self._store_locked():
-                self.store.save({"client_id": attempt.client_id,
-                                 "access_token": tokens["access_token"],
-                                 "refresh_token": tokens["refresh_token"],
-                                 "scope": SCOPE,
-                                 "expires_at": time.time() + int(tokens.get("expires_in", 3600))})
+                account = {"client_id": attempt.client_id,
+                           "access_token": tokens["access_token"],
+                           "refresh_token": tokens["refresh_token"],
+                           "scope": SCOPE,
+                           "expires_at": time.time() + int(tokens.get("expires_in", 3600))}
+                if self.client_secret:
+                    account["client_secret"] = self.client_secret
+                self.store.save(account)
             self._cache = None
 
     def forget(self) -> None:
@@ -275,9 +282,12 @@ class CalendarClient:
                 if not data or data.get("scope") != SCOPE:
                     raise CalendarError("Connect Calendar in the desktop app first")
                 if float(data.get("expires_at", 0)) - time.time() < 120:
-                    tokens = self._token_request({"client_id": data["client_id"],
-                                                  "refresh_token": data["refresh_token"],
-                                                  "grant_type": "refresh_token"})
+                    form = {"client_id": data["client_id"],
+                            "refresh_token": data["refresh_token"],
+                            "grant_type": "refresh_token"}
+                    if data.get("client_secret"):
+                        form["client_secret"] = data["client_secret"]
+                    tokens = self._token_request(form)
                     if not isinstance(tokens.get("access_token"), str):
                         raise CalendarError("Calendar session could not be renewed; sign in again")
                     if tokens.get("scope") and SCOPE not in str(tokens["scope"]).split():

@@ -77,6 +77,29 @@ def test_authorization_saves_only_readonly_grant():
     assert client.configured()
 
 
+def test_desktop_secret_is_used_for_exchange_and_renewal():
+    forms = []
+    def handler(request):
+        if request.method == "POST":
+            form = parse_qs(request.content.decode())
+            forms.append(form)
+            assert form["client_secret"] == ["test-secret"]
+            if form["grant_type"] == ["authorization_code"]:
+                return httpx.Response(200, json={"access_token": "access", "refresh_token": "refresh",
+                                                 "scope": SCOPE, "expires_in": 0})
+            return httpx.Response(200, json={"access_token": "renewed", "expires_in": 3600})
+        return httpx.Response(200, json={"items": []})
+    store = MemoryStore()
+    client = CalendarClient(store, httpx.Client(transport=httpx.MockTransport(handler)),
+                            client_secret="test-secret")
+    attempt = client.begin_authorization("desktop.apps.googleusercontent.com")
+    attempt.callback.put({"state": attempt.state, "code": "auth-code"})
+    client.finish_authorization(attempt, timeout=0.1)
+    assert store.data["client_secret"] == "test-secret"
+    assert client.upcoming(force=True)["events"] == []
+    assert [form["grant_type"][0] for form in forms] == ["authorization_code", "refresh_token"]
+
+
 def test_upcoming_is_bounded_private_and_cached():
     requests = []
     def handler(request):
