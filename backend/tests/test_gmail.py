@@ -139,3 +139,15 @@ def test_pkce_and_loopback_parameters():
         assert "gmail/callback" in attempt.redirect_uri
     finally:
         attempt.close()
+
+
+def test_gmail_pulse_count_clears_when_refresh_fails():
+    from sashmo.state import StateStore
+
+    state = StateStore()
+    state.update_gmail({"unread_count": 3, "messages": []}, None)
+    connected_version = state.version
+    assert state.pulse(-1)["gmail_unread_count"] == 3
+    state.update_gmail(None, "Gmail unavailable")
+    assert state.version > connected_version
+    assert state.pulse(connected_version)["gmail_unread_count"] is None

@@ -60,13 +60,15 @@ class StateStore:
             "last_updated_local": self.last_updated_local,
             "notification_count": len(self.notifications),
             "notifications": self.notifications[-3:],
-            "gmail_unread_count": (self.gmail_snapshot or {}).get("unread_count"),
+            "gmail_unread_count": ((self.gmail_snapshot or {}).get("unread_count")
+                                   if self.gmail_snapshot is not None and self.gmail_error is None else None),
             "calendar_event_count": (len((self.calendar_snapshot or {}).get("events") or [])
                                      if self.calendar_snapshot is not None and self.calendar_error is None else None),
         }
 
     def update_gmail(self, snapshot: dict[str, Any] | None, error: str | None) -> None:
         previous_count = (self.gmail_snapshot or {}).get("unread_count")
+        previous_error = self.gmail_error
         new_count = (snapshot or {}).get("unread_count")
         if snapshot is not None:
             self.gmail_snapshot = snapshot
@@ -74,7 +76,7 @@ class StateStore:
             self.gmail_snapshot = None
             new_count = None
         self.gmail_error = error
-        if new_count != previous_count:
+        if new_count != previous_count or error != previous_error:
             self.version += 1
 
     def update_calendar(self, snapshot: dict[str, Any] | None, error: str | None) -> None:

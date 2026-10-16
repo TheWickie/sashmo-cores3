@@ -57,6 +57,16 @@ def test_mail_answers_use_cached_metadata_and_local_voice_only(tmp_path):
     assert client.requests == []
 
 
+def test_stale_mail_answer_does_not_present_cached_count_as_current(tmp_path):
+    class State:
+        gmail_snapshot = {"unread_count": 3, "messages": []}
+        gmail_error = "Gmail unavailable"
+    provider = ConversationProvider(tmp_path / "projects.local.json", client=FakePlanClient(), state=State())
+    reply = asyncio.run(provider.respond("How many emails?", None, True))
+    assert "temporarily unavailable" in reply
+    assert "3 unread" not in reply
+
+
 def test_calendar_answers_stay_local_and_do_not_invoke_plan(tmp_path):
     from datetime import datetime, timedelta
     tomorrow = (datetime.now().astimezone() + timedelta(days=1)).date().isoformat()

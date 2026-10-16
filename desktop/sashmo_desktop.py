@@ -444,7 +444,10 @@ class SashmoDesktop(tk.Tk):
             self.gmail_status.configure(text=f"Connected · {snapshot.get('unread_count', 0)} unread · "
                                         "recent headers below", fg=ACCENT)
         else:
-            self.gmail_status.configure(text=gmail.get("error") or "Gmail not connected", fg=MUTED)
+            note = gmail.get("error") or "Gmail not connected"
+            if snapshot.get("messages"):
+                note += " · cached headers below may be old"
+            self.gmail_status.configure(text=note, fg=MUTED)
         lines = []
         for item in snapshot.get("messages") or []:
             lines.append(f"{item.get('from') or 'Unknown sender'}\n"
@@ -524,7 +527,10 @@ class SashmoDesktop(tk.Tk):
             self.calendar_status.configure(text=f"Connected · {len(snapshot.get('events') or [])} upcoming event(s)",
                                            fg=ACCENT)
         else:
-            self.calendar_status.configure(text=calendar.get("error") or "Calendar not connected", fg=MUTED)
+            note = calendar.get("error") or "Calendar not connected"
+            if snapshot.get("events"):
+                note += " · cached events below may be old"
+            self.calendar_status.configure(text=note, fg=MUTED)
         lines = []
         for item in snapshot.get("events") or []:
             start = item.get("start") or "Time unavailable"

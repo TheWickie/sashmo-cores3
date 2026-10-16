@@ -74,6 +74,8 @@ class ConversationProvider:
         snapshot = getattr(self.state, "gmail_snapshot", None)
         if snapshot is None:
             return "Gmail is not connected. You can connect it in Sashmo on Windows."
+        if getattr(self.state, "gmail_error", None):
+            return "Gmail is temporarily unavailable. Check Sashmo on Windows."
         count = snapshot.get("unread_count")
         if re.search(r"\b(latest|recent|newest)\b", utterance):
             messages = snapshot.get("messages") or []

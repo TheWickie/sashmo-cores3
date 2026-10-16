@@ -103,7 +103,7 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
                     x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
         authenticate(x_sashmo_token)
         store.record_device(battery, charging, usb, wifi_rssi)
-        return JSONResponse(store.pulse(since))
+        return JSONResponse(store.pulse(since), headers={"Cache-Control": "no-store"})
 
     @app.get("/v1/status")
     async def status(request: Request, x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
