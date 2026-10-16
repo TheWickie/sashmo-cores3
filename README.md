@@ -73,6 +73,8 @@ The Gmail page supports a separate Google Desktop OAuth client ID and browser co
 
 The Calendar page uses the same Google Desktop OAuth client ID and secret, with its own browser consent separate from Gmail. Enable the Google Calendar API in the same Google Cloud project, then enter the client credentials and select **Connect Calendar**. Sashmo requests `calendar.events.readonly` and caches up to 20 upcoming events from the primary calendar for the next 48 hours. It requests no descriptions, locations, attendees or conference details; private event titles are masked. Event data stays on the PC and is spoken with local Windows speech. The CoreS3 receives only an event count. Calendar remains disconnected until browser consent succeeds.
 
+While the Google OAuth app is **External / Testing**, Google expires its refresh tokens after seven days for these scopes. Reconnect Calendar and Gmail in the dashboard when prompted. [Google OAuth token policy](https://developers.google.com/identity/protocols/oauth2)
+
 When Gmail or Calendar is connected, the CoreS3 idle screen shows compact unread-mail and upcoming-event counts. Disconnected services do not display a zero count.
 If a Google refresh fails, the dashboard marks cached information as potentially old, the device hides the affected count, and voice stops reporting it as current until the connection recovers.
 
