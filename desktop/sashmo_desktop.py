@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import socket
 import subprocess
 import sys
@@ -15,7 +16,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +24,7 @@ BACKEND = ROOT / "backend"
 CONFIG = ROOT / "config.local.json"
 KEY_FILE = ROOT / "openAIAPIKey.txt"
 LOG_FILE = ROOT / "work" / "desktop-service.log"
+PROJECTS_FILE = ROOT / "projects.local.json"
 APP_NAME = "Sashmo"
 
 BG = "#0a1220"
@@ -85,6 +87,12 @@ class ServiceController:
         url, headers = self.endpoint()
         request = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(request, timeout=2.5) as response:
+            return json.load(response)
+
+    def fetch_projects(self) -> dict:
+        url, headers = self.endpoint()
+        request = urllib.request.Request(url.replace("/v1/status", "/v1/projects"), headers=headers)
+        with urllib.request.urlopen(request, timeout=35) as response:
             return json.load(response)
 
     def port_occupied(self) -> bool:
@@ -243,7 +251,8 @@ class SashmoDesktop(tk.Tk):
         sidebar.pack_propagate(False)
         self._label(sidebar, "WORKSPACE", 9, MUTED, "bold").pack(anchor="w", padx=18, pady=(22, 9))
         self.nav_buttons: dict[str, tk.Button] = {}
-        for name, title in (("overview", "Overview"), ("settings", "Settings"), ("diagnostics", "Diagnostics")):
+        for name, title in (("overview", "Overview"), ("projects", "Projects"),
+                            ("settings", "Settings"), ("diagnostics", "Diagnostics")):
             button = self._button(sidebar, title, lambda page=name: self._show_page(page))
             button.configure(anchor="w", padx=18)
             button.pack(fill="x", padx=9, pady=4)
@@ -255,6 +264,7 @@ class SashmoDesktop(tk.Tk):
         self.content.pack(side="left", fill="both", expand=True)
         self.pages: dict[str, tk.Frame] = {}
         self._build_overview()
+        self._build_projects()
         self._build_settings()
         self._build_diagnostics()
 
@@ -359,6 +369,100 @@ class SashmoDesktop(tk.Tk):
         self._label(page, "Device pulse intervals are embedded in firmware; changing them requires a rebuild and flash.",
                     10, MUTED).pack(anchor="w", pady=(18, 0))
 
+    def _build_projects(self) -> None:
+        page = self._page("projects")
+        self._heading(page, "Projects", "Only folders you add here can be inspected by Sashmo")
+        row = tk.Frame(page, bg=BG)
+        row.pack(fill="x", pady=(0, 14))
+        self._button(row, "Add Git project", self._add_project, True).pack(side="left")
+        self._button(row, "Refresh", self._refresh_projects).pack(side="left", padx=10)
+        self.projects_note = self._label(page, "Loading approved projects…", 11, MUTED)
+        self.projects_note.pack(anchor="w", pady=(0, 12))
+        self.projects_view = tk.Text(page, bg=PANEL, fg=TEXT, insertbackground=TEXT, relief="flat",
+                                     font=("Segoe UI", 11), wrap="word", padx=18, pady=16)
+        self.projects_view.pack(fill="both", expand=True)
+        self.projects_view.configure(state="disabled")
+
+    def _set_projects_text(self, value: str) -> None:
+        self.projects_view.configure(state="normal")
+        self.projects_view.delete("1.0", "end")
+        self.projects_view.insert("1.0", value)
+        self.projects_view.configure(state="disabled")
+
+    def _refresh_projects(self) -> None:
+        self.projects_note.configure(text="Reading approved project status…")
+
+        def work() -> None:
+            try:
+                result = self.controller.fetch_projects()
+                self.results.put(("projects", result, None))
+            except Exception as exc:
+                self.results.put(("projects", None, type(exc).__name__))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _render_projects(self, result: dict | None, error: str | None) -> None:
+        if error:
+            self.projects_note.configure(text="Desktop service unavailable. Start it and refresh.")
+            self._set_projects_text("Project status could not be loaded.")
+            return
+        registry_error = (result or {}).get("error")
+        if registry_error == "not_configured":
+            self.projects_note.configure(text="No projects approved yet")
+            self._set_projects_text("Choose Add Git project to allow Sashmo to report a folder's Git status.\n"
+                                    "Sashmo reads the branch, last commit time, and whether files changed."
+                                    " It does not read source files or run project commands.")
+            return
+        if registry_error:
+            self.projects_note.configure(text="The private project list needs attention")
+            self._set_projects_text(f"Registry error: {registry_error}. Add or fix the local project list.")
+            return
+        projects = (result or {}).get("projects") or []
+        self.projects_note.configure(text=f"{len(projects)} approved project(s)")
+        lines = []
+        for project in projects:
+            name = project.get("name") or "Unnamed project"
+            state = project.get("state")
+            if state == "ok":
+                change = "Uncommitted changes" if project.get("dirty") else "Working tree clean"
+                lines.append(f"{name}\n  Branch: {project.get('branch') or 'unknown'} · {change}\n"
+                             f"  Last commit: {project.get('last_commit') or 'none'}")
+            else:
+                lines.append(f"{name}\n  Status unavailable: {state}")
+        self._set_projects_text("\n\n".join(lines) if lines else "No projects are listed yet.")
+
+    def _add_project(self) -> None:
+        selected = filedialog.askdirectory(parent=self, title="Choose a Git project folder", mustexist=True)
+        if not selected:
+            return
+        path = Path(selected).resolve()
+        try:
+            result = subprocess.run(["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+                                    capture_output=True, text=True, encoding="utf-8", timeout=5, check=True)
+            if Path(result.stdout.strip()).resolve() != path:
+                raise ValueError("Choose the top folder of a Git project")
+            data = json.loads(PROJECTS_FILE.read_text(encoding="utf-8")) if PROJECTS_FILE.exists() else {
+                "allowed_roots": [], "projects": []}
+            if not isinstance(data.get("projects"), list) or not isinstance(data.get("allowed_roots"), list):
+                raise ValueError("The private project list is invalid")
+            if any(Path(item.get("path", "")).resolve() == path for item in data["projects"]):
+                raise ValueError("This project is already approved")
+            if len(data["projects"]) >= 32:
+                raise ValueError("The project list is full")
+            base = re.sub(r"[^a-z0-9_-]+", "-", path.name.lower()).strip("-")[:50] or "project"
+            used = {item.get("id") for item in data["projects"]}
+            project_id = base
+            index = 2
+            while project_id in used:
+                project_id = f"{base}-{index}"
+                index += 1
+            data["allowed_roots"].append(str(path))
+            data["projects"].append({"id": project_id, "name": path.name, "path": str(path)})
+            PROJECTS_FILE.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            self._refresh_projects()
+        except (OSError, ValueError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+            messagebox.showerror("Sashmo projects", f"Could not add project: {exc}", parent=self)
+
     def _build_diagnostics(self) -> None:
         page = self._page("diagnostics")
         self._heading(page, "Diagnostics", "Connection information without passwords, tokens or transcripts")
@@ -383,6 +487,8 @@ class SashmoDesktop(tk.Tk):
         self.current_page = page
         if page == "diagnostics":
             self._refresh_log()
+        elif page == "projects":
+            self._refresh_projects()
 
     def _action(self, action) -> None:
         if self.action_busy or self.closing:
@@ -462,6 +568,8 @@ class SashmoDesktop(tk.Tk):
                     self._action_done(item[1])
                 elif item[0] == "poll":
                     self._poll_done(item[1], item[2])
+                elif item[0] == "projects":
+                    self._render_projects(item[1], item[2])
         except queue.Empty:
             pass
         self.after(100, self._drain_results)

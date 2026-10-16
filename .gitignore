@@ -10,6 +10,7 @@ tools/
 work/
 .venv/
 config.local.json
+projects.local.json
 firmware/Sashmo/config_private.h
 *.log
 __pycache__/

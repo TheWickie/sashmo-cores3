@@ -46,6 +46,8 @@ Change `COM4` to the detected device port. The script creates a private firmware
 
 Double-click `Sashmo.cmd` to open the Windows dashboard. It starts and monitors the local service. The Overview shows reported Codex quota, the last CoreS3 check-in, battery, charging, Wi-Fi signal and voice readiness. Settings includes the Codex refresh interval and optional launch at Windows sign-in. Diagnostics shows service output without credentials or transcripts. Closing the dashboard stops a service that it started.
 
+Use the Projects page to add Git repositories that Sashmo may inspect. Its read-only status view shows branch, uncommitted changes and last commit. Approved paths stay in the ignored `projects.local.json`; no project is inspected before you add it.
+
 Tap the microphone control on the CoreS3 and speak within the listening window. The current read-only questions cover quota, reset time, time, date and connection status. Tap the quota card for details and tap again to return. Voice and status use Wi-Fi; USB is needed for charging, flashing and optional serial diagnostics only.
 
 If the PC's LAN address or service port changes, update `config.local.json` and reflash the CoreS3. Reserving the PC's address in the home router is a practical way to keep the current connection stable. Hostname or mDNS discovery is a future improvement.

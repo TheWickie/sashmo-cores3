@@ -14,7 +14,9 @@ from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
 
+from .projects import ProjectRegistry
 from .speech import process_audio, validate_wav
 from .state import QuotaWorker, StateStore
 
@@ -79,6 +81,13 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
     async def status(x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
         authenticate(x_sashmo_token)
         return JSONResponse(store.status(), headers={"Cache-Control": "no-store"})
+
+    @app.get("/v1/projects")
+    async def projects(x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
+        authenticate(x_sashmo_token)
+        registry = ProjectRegistry(Path(__file__).resolve().parents[2] / "projects.local.json")
+        result = await run_in_threadpool(registry.list_projects)
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
     @app.post("/v1/voice")
     async def voice(request: Request, x_sashmo_token: str | None = Header(default=None)) -> Response:

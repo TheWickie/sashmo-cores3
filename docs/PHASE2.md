@@ -42,3 +42,7 @@ The local service caches external Codex data independently of device pulses. USB
 - Public source availability alone does not establish that a specific account can use subscription-backed inference. Verify the documented OAuth scopes and actual account response before enabling it.
 - Speech API use is optional and may be billed. Billed text inference is not configured or used.
 - Device actions remain read-only until an explicit action-permission design and user approval are in place.
+
+## Approved project registry
+
+The dashboard's Projects page lets the local user choose Git repository folders. The private `projects.local.json` allowlist is ignored by Git. The authenticated service reports only the approved display name, branch, clean/dirty state and last commit identifier/time; it does not send paths or source contents to the device. No project is inspected until it is explicitly added. Voice access to this registry and Codex task summaries remain future work.

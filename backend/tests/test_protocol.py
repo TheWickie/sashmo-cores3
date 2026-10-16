@@ -62,3 +62,12 @@ def test_battery_history_records_authenticated_pulses_only(tmp_path):
     assert all(row["usb_powered"] == "False" for row in rows)
     assert all(set(row) == {"observed_at_utc", "battery_percent", "charging",
                             "usb_powered", "wifi_rssi"} for row in rows)
+
+
+def test_projects_endpoint_requires_device_token():
+    app = create_app(Config("192.168.1.10", 8765, "x" * 32), start_worker=False)
+    with TestClient(app) as client:
+        assert client.get("/v1/projects").status_code == 401
+        response = client.get("/v1/projects", headers={"X-Sashmo-Token": "x" * 32})
+        assert response.status_code == 200
+        assert set(response.json()) == {"projects", "error"}
