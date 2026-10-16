@@ -14,13 +14,17 @@ import time
 import tkinter as tk
 import urllib.error
 import urllib.request
+import webbrowser
 from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
+from sashmo.siwc import SIWCClient, WindowsTokenStore
 CONFIG = ROOT / "config.local.json"
 KEY_FILE = ROOT / "openAIAPIKey.txt"
 LOG_FILE = ROOT / "work" / "desktop-service.log"
@@ -210,11 +214,15 @@ class SashmoDesktop(tk.Tk):
         self.poll_after_id: str | None = None
         self.closing = False
         self.action_busy = False
+        self.account_busy = False
         self.auto_service = True
         self.recovery_delay = 2.0
         self.next_recovery_at = 0.0
         self.results: queue.Queue[tuple] = queue.Queue()
         self.status: dict | None = None
+        self.account_client = SIWCClient(WindowsTokenStore())
+        self.account_choices: dict[str, str] = {}
+        self.available_models: dict[str, str] = {}
         self.last_message = "Starting Sashmo"
 
         self._build_shell()
@@ -251,7 +259,7 @@ class SashmoDesktop(tk.Tk):
         sidebar.pack_propagate(False)
         self._label(sidebar, "WORKSPACE", 9, MUTED, "bold").pack(anchor="w", padx=18, pady=(22, 9))
         self.nav_buttons: dict[str, tk.Button] = {}
-        for name, title in (("overview", "Overview"), ("projects", "Projects"),
+        for name, title in (("overview", "Overview"), ("accounts", "ChatGPT"), ("projects", "Projects"),
                             ("settings", "Settings"), ("diagnostics", "Diagnostics")):
             button = self._button(sidebar, title, lambda page=name: self._show_page(page))
             button.configure(anchor="w", padx=18)
@@ -264,6 +272,7 @@ class SashmoDesktop(tk.Tk):
         self.content.pack(side="left", fill="both", expand=True)
         self.pages: dict[str, tk.Frame] = {}
         self._build_overview()
+        self._build_accounts()
         self._build_projects()
         self._build_settings()
         self._build_diagnostics()
@@ -383,6 +392,134 @@ class SashmoDesktop(tk.Tk):
         self.projects_view.pack(fill="both", expand=True)
         self.projects_view.configure(state="disabled")
 
+    def _build_accounts(self) -> None:
+        page = self._page("accounts")
+        self._heading(page, "ChatGPT plan", "Optional sign-in for natural replies through an eligible ChatGPT account")
+        card = Card(page)
+        card.pack(fill="x")
+        self._label(card, "ACCOUNT", 10, MUTED, "bold").pack(anchor="w", padx=24, pady=(22, 8))
+        self.account_status = self._label(card, "No account connected", 12, TEXT)
+        self.account_status.pack(anchor="w", padx=24, pady=(0, 10))
+        self.account_var = tk.StringVar()
+        self.account_box = ttk.Combobox(card, textvariable=self.account_var, state="readonly", width=42)
+        self.account_box.pack(anchor="w", padx=24, pady=(0, 14))
+        self.account_box.bind("<<ComboboxSelected>>", lambda _event: self._refresh_models())
+        row = tk.Frame(card, bg=PANEL)
+        row.pack(fill="x", padx=24, pady=(0, 20))
+        self._button(row, "Continue with ChatGPT", self._sign_in_chatgpt, True).pack(side="left")
+        self._button(row, "Forget on this PC", self._forget_account).pack(side="left", padx=10)
+
+        models = Card(page)
+        models.pack(fill="x", pady=(16, 0))
+        self._label(models, "CONVERSATION MODEL", 10, MUTED, "bold").pack(anchor="w", padx=24, pady=(22, 8))
+        self.model_status = self._label(models, "Sign in to see available models", 11, TEXT)
+        self.model_status.pack(anchor="w", padx=24, pady=(0, 8))
+        self.model_var = tk.StringVar()
+        self.model_box = ttk.Combobox(models, textvariable=self.model_var, state="readonly", width=42)
+        self.model_box.pack(anchor="w", padx=24, pady=(0, 12))
+        self._button(models, "Use selected model", self._select_model, True).pack(anchor="w", padx=24, pady=(0, 22))
+        self._label(page, "Basic quota, time and connection answers stay local. A selected model handles other "
+                    "questions through your ChatGPT plan. It never falls back to billed text API inference.",
+                    10, MUTED, wraplength=620, justify="left").pack(anchor="w", pady=(18, 0))
+
+    def _refresh_accounts(self) -> None:
+        def work() -> None:
+            try:
+                self.results.put(("accounts", self.account_client.account_summaries(), None))
+            except Exception as exc:
+                self.results.put(("accounts", None, type(exc).__name__))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _render_accounts(self, accounts: list[dict] | None, error: str | None) -> None:
+        if error:
+            self.account_status.configure(text="Saved account could not be read; check Diagnostics", fg=AMBER)
+            return
+        self.account_choices = {}
+        selected = ""
+        for account in accounts or []:
+            label = f"{account.get('email') or 'ChatGPT account'} · {account['key'][:6]}"
+            self.account_choices[label] = account["key"]
+            if account.get("active"):
+                selected = label
+        self.account_box["values"] = list(self.account_choices)
+        self.account_var.set(selected)
+        if selected:
+            active = next(account for account in accounts or [] if account["key"] == self.account_choices[selected])
+            model = active.get("model")
+            self.account_status.configure(text="Connected · model selected" if model else
+                                          "Connected · choose a model to enable conversation", fg=ACCENT)
+            self._refresh_models()
+        else:
+            self.account_status.configure(text="No ChatGPT account connected", fg=MUTED)
+            self.model_status.configure(text="Sign in to see available models")
+            self.model_box["values"] = []
+            self.model_var.set("")
+
+    def _refresh_models(self) -> None:
+        key = self.account_choices.get(self.account_var.get())
+        if not key:
+            return
+        self.model_status.configure(text="Checking models available to this account…")
+        def work() -> None:
+            try:
+                self.results.put(("models", self.account_client.list_models(key), None))
+            except Exception as exc:
+                self.results.put(("models", None, type(exc).__name__))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _render_models(self, models: list[dict] | None, error: str | None) -> None:
+        if error:
+            self.model_status.configure(text="Model list unavailable. Reconnect this account and retry.")
+            return
+        self.available_models = {f"{item['display_name']} · {item['slug']}": item["slug"]
+                                 for item in models or []}
+        self.model_box["values"] = list(self.available_models)
+        self.model_status.configure(text=f"{len(self.available_models)} available model(s). Select one to enable conversation.")
+        self.model_var.set("")
+
+    def _sign_in_chatgpt(self) -> None:
+        if self.account_busy:
+            return
+        self.account_busy = True
+        self.account_status.configure(text="Waiting for browser sign-in…", fg=AMBER)
+        def work() -> None:
+            try:
+                attempt = self.account_client.begin_authorization()
+                if not webbrowser.open(attempt.url):
+                    attempt.close()
+                    raise RuntimeError("Could not open the system browser")
+                self.account_client.finish_authorization(attempt)
+                self.results.put(("account_action", "ChatGPT sign-in completed"))
+            except Exception as exc:
+                self.results.put(("account_action", f"ChatGPT sign-in failed: {exc}"))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _select_model(self) -> None:
+        key = self.account_choices.get(self.account_var.get())
+        model = self.available_models.get(self.model_var.get())
+        if not key or not model:
+            self.model_status.configure(text="Choose an account and a listed model first")
+            return
+        def work() -> None:
+            try:
+                self.account_client.select_model(key, model)
+                self.results.put(("account_action", "Conversation model enabled"))
+            except Exception as exc:
+                self.results.put(("account_action", f"Could not select model: {exc}"))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _forget_account(self) -> None:
+        key = self.account_choices.get(self.account_var.get())
+        if not key:
+            return
+        def work() -> None:
+            try:
+                self.account_client.forget_account(key)
+                self.results.put(("account_action", "Local ChatGPT account removed"))
+            except Exception as exc:
+                self.results.put(("account_action", f"Could not remove account: {exc}"))
+        threading.Thread(target=work, daemon=True).start()
+
     def _set_projects_text(self, value: str) -> None:
         self.projects_view.configure(state="normal")
         self.projects_view.delete("1.0", "end")
@@ -489,6 +626,8 @@ class SashmoDesktop(tk.Tk):
             self._refresh_log()
         elif page == "projects":
             self._refresh_projects()
+        elif page == "accounts":
+            self._refresh_accounts()
 
     def _action(self, action) -> None:
         if self.action_busy or self.closing:
@@ -570,6 +709,15 @@ class SashmoDesktop(tk.Tk):
                     self._poll_done(item[1], item[2])
                 elif item[0] == "projects":
                     self._render_projects(item[1], item[2])
+                elif item[0] == "accounts":
+                    self._render_accounts(item[1], item[2])
+                elif item[0] == "models":
+                    self._render_models(item[1], item[2])
+                elif item[0] == "account_action":
+                    self.account_busy = False
+                    self.account_status.configure(text=item[1], fg=ACCENT if "failed" not in item[1]
+                                                  and "Could not" not in item[1] else AMBER)
+                    self._refresh_accounts()
         except queue.Empty:
             pass
         self.after(100, self._drain_results)

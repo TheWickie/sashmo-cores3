@@ -26,6 +26,7 @@ class StateStore:
         self.device_usb_powered: bool | None = None
         self.device_wifi_rssi: int | None = None
         self.voice_state = "idle"
+        self.voice_provider = "local"
         self.last_voice_local: str | None = None
         self.telemetry_path = telemetry_path
 
@@ -87,7 +88,8 @@ class StateStore:
                        "charging": self.device_charging,
                        "usb_powered": self.device_usb_powered,
                        "wifi_rssi": self.device_wifi_rssi},
-            "voice": {"state": self.voice_state, "last_request_local": self.last_voice_local},
+            "voice": {"state": self.voice_state, "last_request_local": self.last_voice_local,
+                      "provider": self.voice_provider},
         }
 
 

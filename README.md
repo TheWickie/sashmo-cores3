@@ -2,7 +2,7 @@
 
 Sashmo is an open-source voice and status companion for the M5Stack CoreS3 and a Windows PC. The CoreS3 provides the touchscreen, microphone, speaker and battery-powered Wi-Fi connection. A local Windows service retrieves reported Codex usage and handles read-only voice questions; a desktop dashboard starts the service and shows device status.
 
-This is an active hardware project. Push-to-talk, quota display, battery telemetry and the dashboard work. Natural conversation, Gmail and other personal integrations are planned, not yet active. See [Phase 2 status](docs/PHASE2.md) for verified behaviour and release blockers.
+This is an active hardware project. Push-to-talk, quota display, battery telemetry and the dashboard work. Optional ChatGPT plan conversation is prepared but awaits account sign-in and live verification. Gmail and other personal integrations are planned. See [Phase 2 status](docs/PHASE2.md) for verified behaviour and release blockers.
 
 ## Requirements
 
@@ -30,6 +30,8 @@ arduino-cli --config-file arduino-cli.yaml lib install ArduinoJson@7.4.3 M5GFX@0
 Create `config.local.json` by running `python backend/setup_config.py --host <YOUR_PC_PRIVATE_IP>`. The script asks for the Wi-Fi network name without echoing it. Put the Wi-Fi password as one line in `wifipassword.txt` at the repository root. These files are ignored by Git. `config.example.json` shows the available settings; edit your private config to adjust the service port, pulse intervals and display brightness.
 
 To use OpenAI transcription and Cedar speech, optionally put an OpenAI API key as one line in `openAIAPIKey.txt`. These audio API calls may incur charges. Without a key, Sashmo uses installed Windows speech fallbacks. Conversational inference is not enabled and is never silently routed to a separately billed API.
+
+For optional natural conversation, open the dashboard's ChatGPT page, choose **Continue with ChatGPT**, complete the system-browser consent, then choose a model listed for that account and select **Use selected model**. This uses a separate local OAuth registration and ChatGPT plan permission. It does not reuse the Codex login or the speech API key. The live account flow has not yet been verified; eligibility and available models depend on the account. If sign-in or plan use fails, Sashmo keeps local read-only voice commands and never uses billed text API inference as a fallback.
 
 The service binds only to the private IPv4 address configured in `config.local.json`, and every device request carries a random device token. The current LAN link uses HTTP, so use it only on a trusted local network; do not forward the service port to the internet. The OpenAI key and Codex sign-in stay on the PC. The CoreS3 firmware contains only its Wi-Fi credentials and device token.
 

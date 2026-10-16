@@ -8,7 +8,7 @@ This document distinguishes code, desktop observations and physical device tests
 - The CoreS3 has shown a quota details screen on the physical display, and spoken replies through its speaker have been heard in earlier device tests.
 - With the DIN base switch ON and USB removed, physical tests confirmed the screen remained on, Wi-Fi pulses continued, and a voice request completed. On the revised firmware, the user heard a reply and saw a return to the main screen; the backend recorded a fresh voice request and battery-powered pulses with charging off. The user then rebooted it without USB and confirmed Wi-Fi and voice worked again. These are short tests, not a battery-runtime claim.
 - The firmware now requests an immediate pulse when Wi-Fi reconnects and has configurable USB, active-battery, idle-battery and low-battery brightness. This revision compiled, flashed successfully and passed the short unplugged voice test.
-- The active text response provider remains a small read-only command router. Open-ended conversation is not active.
+- The active text response provider remains local until a user signs in through Sashmo and explicitly selects an available ChatGPT model. The subscription-backed path is implemented but has not been live-authorized or tested on this account.
 
 ## Milestone 1: standalone battery operation
 
@@ -29,7 +29,7 @@ The local service caches external Codex data independently of device pulses. USB
 ## Next milestones
 
 2. **CoreS3 interface:** reusable 320 × 240 visual components, clear interaction states, touch cancellation and device testing.
-3. **Conversation:** official Sign in with ChatGPT OAuth for eligible local open-source apps, model discovery, account controls and multi-turn context. Keep billed inference disabled. Subscription sign-in requires user browser consent and does not expose ChatGPT history or memory.
+3. **Conversation:** the official Sign in with ChatGPT OAuth flow, protected local account storage, model discovery and bounded multi-turn text context are implemented. A user must complete browser consent and select a listed model before natural voice replies are enabled. No live sign-in or inference has run. Subscription sign-in does not expose ChatGPT history or memory; billed text API inference remains disabled.
 4. **Gmail:** separate Google OAuth with read-only scopes, metadata cache, user-controlled access to message bodies and quiet notifications. Requires user account consent and Google API configuration.
 5. **Codex and projects:** approved project registry, read-only status and task summaries through documented interfaces, plus explicit approval handling for consequential actions.
 6. **Desktop polish:** account, conversation, device, notification and diagnostic views; reliable background service lifetime.
@@ -42,6 +42,10 @@ The local service caches external Codex data independently of device pulses. USB
 - Public source availability alone does not establish that a specific account can use subscription-backed inference. Verify the documented OAuth scopes and actual account response before enabling it.
 - Speech API use is optional and may be billed. Billed text inference is not configured or used.
 - Device actions remain read-only until an explicit action-permission design and user approval are in place.
+
+## ChatGPT plan conversation
+
+The Windows dashboard has a ChatGPT page with a system-browser sign-in button, saved account selection, current model discovery and an explicit model enable action. Credentials are protected for the current Windows user with DPAPI in LocalAppData. The CoreS3 never receives them. The text provider uses only an account's authorized ChatGPT plan token, requires a model reported by that account, and sends Responses requests with `store=false` and `stream=true`. Unknown voice questions use this provider only after the user signs in and selects a model; quota, reset, time and connection answers stay local. A plan error gives an error reply and never switches to the speech API key for text inference. Conversation context is held in desktop memory for up to 30 minutes and is not durable memory. The browser consent, model list and a real conversational reply still need live verification.
 
 ## Approved project registry
 

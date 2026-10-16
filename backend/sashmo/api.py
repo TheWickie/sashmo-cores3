@@ -16,6 +16,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
+from .conversation import ConversationProvider
 from .projects import ProjectRegistry
 from .speech import process_audio, validate_wav
 from .state import QuotaWorker, StateStore
@@ -47,9 +48,12 @@ class Config:
         return cls(str(host), port, token, poll)
 
 
-def create_app(config: Config, *, start_worker: bool = True, state: StateStore | None = None) -> FastAPI:
+def create_app(config: Config, *, start_worker: bool = True, state: StateStore | None = None,
+               conversation: ConversationProvider | None = None) -> FastAPI:
     telemetry_path = Path(__file__).resolve().parents[2] / "work" / "battery-history.csv"
     store = state or StateStore(telemetry_path=telemetry_path if start_worker else None)
+    voice_provider = conversation or (ConversationProvider(Path(__file__).resolve().parents[2] /
+                                                          "projects.local.json") if start_worker else None)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -104,7 +108,9 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         store.voice_state = "processing"
         try:
-            transcript, answer, output = await process_audio(audio, store.quota, store.codex_connected)
+            transcript, answer, output = await process_audio(audio, store.quota, store.codex_connected,
+                                                             provider=voice_provider)
+            store.voice_provider = voice_provider.last_source if voice_provider else "local"
         except Exception:
             LOG.exception("Voice processing failed")
             raise HTTPException(status_code=503, detail="Speech processing unavailable") from None
