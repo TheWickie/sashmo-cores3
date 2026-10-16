@@ -22,9 +22,17 @@ from tkinter import filedialog, messagebox, ttk
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
+DESKTOP = ROOT / "desktop"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
+if str(DESKTOP) not in sys.path:
+    sys.path.insert(0, str(DESKTOP))
 from sashmo.siwc import SIWCClient, WindowsTokenStore
+from sashmo.gmail import GmailClient, GmailTokenStore
+from service_host import (autostart_enabled as backend_autostart_enabled,
+                          send_command as send_service_command,
+                          set_autostart as set_backend_autostart,
+                          start_supervisor)
 CONFIG = ROOT / "config.local.json"
 KEY_FILE = ROOT / "openAIAPIKey.txt"
 LOG_FILE = ROOT / "work" / "desktop-service.log"
@@ -78,8 +86,6 @@ def _main_windows(quota: dict | None) -> list[dict]:
 
 class ServiceController:
     def __init__(self) -> None:
-        self.process: subprocess.Popen | None = None
-        self.log_stream = None
         self.lock = threading.Lock()
 
     def endpoint(self) -> tuple[str, dict[str, str]]:
@@ -109,89 +115,28 @@ class ServiceController:
 
     def start(self) -> str:
         with self.lock:
-            if self.process and self.process.poll() is None:
-                return "Service already running"
-            if self.log_stream:
-                self.log_stream.close()
-                self.log_stream = None
-            try:
-                self.fetch()
-                return "Connected to an existing Sashmo service"
-            except (OSError, ValueError, urllib.error.URLError):
-                pass
-            if self.port_occupied():
-                port = int(load_config().get("port", 8765))
-                raise RuntimeError(f"Port {port} is in use by another service or a Sashmo instance with different settings.")
-            LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-            self.log_stream = LOG_FILE.open("ab", buffering=0)
-            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            backend_executable = Path(sys.executable)
-            if backend_executable.name.casefold() == "pythonw.exe":
-                console_executable = backend_executable.with_name("python.exe")
-                if console_executable.is_file():
-                    backend_executable = console_executable
-            self.process = subprocess.Popen(
-                [str(backend_executable), str(BACKEND / "run.py")], cwd=BACKEND,
-                stdin=subprocess.DEVNULL, stdout=self.log_stream, stderr=subprocess.STDOUT,
-                creationflags=flags,
-            )
-            return "Starting desktop service"
+            status = start_supervisor()
+            if status.get("external"):
+                return "Connected to an existing Sashmo service; independent host is waiting to take over"
+            return "Independent desktop service running" if status.get("running") else "Starting independent desktop service"
 
     def stop(self) -> str:
         with self.lock:
-            process = self.process
-            if not process or process.poll() is not None:
-                return "This service was started outside the dashboard; it remains running"
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=3)
-            self.process = None
-            if self.log_stream:
-                self.log_stream.close()
-                self.log_stream = None
-            return "Desktop service stopped"
+            result = send_service_command("stop")
+            return result.get("message", "Stopping desktop service")
 
     def restart(self) -> str:
-        if not self.process or self.process.poll() is not None:
-            return "This service was started outside the dashboard; close it before restarting from Sashmo"
-        self.stop()
-        self.start()
-        return "Desktop service restarted"
+        with self.lock:
+            result = send_service_command("restart")
+            return result.get("message", "Restarting desktop service")
 
 
 def autostart_enabled() -> bool:
-    if os.name != "nt":
-        return False
-    import winreg
-
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run") as key:
-            value, _ = winreg.QueryValueEx(key, APP_NAME)
-            return str(ROOT / "desktop" / "sashmo_desktop.py").casefold() in str(value).casefold()
-    except OSError:
-        return False
+    return backend_autostart_enabled()
 
 
 def set_autostart(enabled: bool) -> None:
-    if os.name != "nt":
-        raise RuntimeError("Automatic launch is available on Windows only")
-    import winreg
-
-    path = r"Software\Microsoft\Windows\CurrentVersion\Run"
-    with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, path, 0, winreg.KEY_SET_VALUE) as key:
-        if enabled:
-            pythonw = Path(sys.executable).with_name("pythonw.exe")
-            executable = pythonw if pythonw.is_file() else Path(sys.executable)
-            command = f'"{executable}" "{ROOT / "desktop" / "sashmo_desktop.py"}"'
-            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, command)
-        else:
-            try:
-                winreg.DeleteValue(key, APP_NAME)
-            except FileNotFoundError:
-                pass
+    set_backend_autostart(enabled)
 
 
 class Card(tk.Frame):
@@ -221,6 +166,8 @@ class SashmoDesktop(tk.Tk):
         self.results: queue.Queue[tuple] = queue.Queue()
         self.status: dict | None = None
         self.account_client = SIWCClient(WindowsTokenStore())
+        self.gmail_client = GmailClient(GmailTokenStore())
+        self.gmail_busy = False
         self.account_choices: dict[str, str] = {}
         self.available_models: dict[str, str] = {}
         self.last_message = "Starting Sashmo"
@@ -259,7 +206,8 @@ class SashmoDesktop(tk.Tk):
         sidebar.pack_propagate(False)
         self._label(sidebar, "WORKSPACE", 9, MUTED, "bold").pack(anchor="w", padx=18, pady=(22, 9))
         self.nav_buttons: dict[str, tk.Button] = {}
-        for name, title in (("overview", "Overview"), ("accounts", "ChatGPT"), ("projects", "Projects"),
+        for name, title in (("overview", "Overview"), ("alerts", "Alerts"),
+                            ("accounts", "ChatGPT"), ("gmail", "Gmail"), ("projects", "Projects"),
                             ("settings", "Settings"), ("diagnostics", "Diagnostics")):
             button = self._button(sidebar, title, lambda page=name: self._show_page(page))
             button.configure(anchor="w", padx=18)
@@ -272,7 +220,9 @@ class SashmoDesktop(tk.Tk):
         self.content.pack(side="left", fill="both", expand=True)
         self.pages: dict[str, tk.Frame] = {}
         self._build_overview()
+        self._build_alerts()
         self._build_accounts()
+        self._build_gmail()
         self._build_projects()
         self._build_settings()
         self._build_diagnostics()
@@ -362,7 +312,7 @@ class SashmoDesktop(tk.Tk):
                  insertbackground=TEXT, relief="flat", font=("Segoe UI", 11), justify="center").pack(side="right")
         self._label(card, "Allowed range: 30–3600. Saving restarts a service launched by this dashboard.", 9, MUTED).pack(anchor="w", padx=24)
         self.autostart_var = tk.BooleanVar(value=autostart_enabled())
-        tk.Checkbutton(card, text="Open Sashmo when I sign in to Windows", variable=self.autostart_var,
+        tk.Checkbutton(card, text="Keep the Sashmo backend running after Windows sign-in", variable=self.autostart_var,
                        bg=PANEL, fg=TEXT, selectcolor=PANEL_LIGHT, activebackground=PANEL,
                        activeforeground=TEXT, font=("Segoe UI", 11), anchor="w").pack(anchor="w", padx=20, pady=(22, 12))
         self._button(card, "Save settings", self._save_settings, True).pack(anchor="w", padx=24, pady=(0, 23))
@@ -421,6 +371,110 @@ class SashmoDesktop(tk.Tk):
         self._label(page, "Basic quota, time and connection answers stay local. A selected model handles other "
                     "questions through your ChatGPT plan. It never falls back to billed text API inference.",
                     10, MUTED, wraplength=620, justify="left").pack(anchor="w", pady=(18, 0))
+
+    def _build_alerts(self) -> None:
+        page = self._page("alerts")
+        self._heading(page, "Alerts", "Current read-only notifications from the local service")
+        self.alerts_note = self._label(page, "Waiting for service…", 11, MUTED)
+        self.alerts_note.pack(anchor="w", pady=(0, 12))
+        self.alerts_view = tk.Text(page, bg=PANEL, fg=TEXT, insertbackground=TEXT, relief="flat",
+                                   font=("Segoe UI", 11), wrap="word", padx=18, pady=16)
+        self.alerts_view.pack(fill="both", expand=True)
+        self.alerts_view.configure(state="disabled")
+
+    def _build_gmail(self) -> None:
+        page = self._page("gmail")
+        self._heading(page, "Gmail", "Optional, read-only message headers and unread count")
+        card = Card(page)
+        card.pack(fill="x")
+        self._label(card, "GOOGLE DESKTOP OAUTH", 10, MUTED, "bold").pack(anchor="w", padx=24, pady=(20, 8))
+        self._label(card, "Create a Google Cloud Desktop OAuth client with the Gmail API enabled, "
+                    "then paste its client ID here.", 10, TEXT, wraplength=610,
+                    justify="left").pack(anchor="w", padx=24)
+        self.gmail_client_var = tk.StringVar(value=load_config().get("google_oauth_client_id", ""))
+        tk.Entry(card, textvariable=self.gmail_client_var, width=65, bg=PANEL_LIGHT, fg=TEXT,
+                 insertbackground=TEXT, relief="flat", font=("Segoe UI", 10)).pack(anchor="w", padx=24, pady=(12, 12))
+        row = tk.Frame(card, bg=PANEL)
+        row.pack(fill="x", padx=24, pady=(0, 18))
+        self._button(row, "Connect Gmail", self._sign_in_gmail, True).pack(side="left")
+        self._button(row, "Forget on this PC", self._forget_gmail).pack(side="left", padx=10)
+        self.gmail_status = self._label(page, "Gmail not connected", 11, MUTED)
+        self.gmail_status.pack(anchor="w", pady=(16, 12))
+        self.gmail_view = tk.Text(page, bg=PANEL, fg=TEXT, insertbackground=TEXT, relief="flat",
+                                  font=("Segoe UI", 10), wrap="word", padx=18, pady=14)
+        self.gmail_view.pack(fill="both", expand=True)
+        self.gmail_view.configure(state="disabled")
+        self._label(page, "This first step requests Gmail metadata only. It cannot read message bodies, "
+                    "search mail or send messages. Google may require verification for public use.",
+                    10, MUTED, wraplength=620, justify="left").pack(anchor="w", pady=(12, 0))
+
+    def _render_gmail(self) -> None:
+        gmail = (self.status or {}).get("gmail") or {}
+        snapshot = gmail.get("snapshot") or {}
+        if gmail.get("connected"):
+            self.gmail_status.configure(text=f"Connected · {snapshot.get('unread_count', 0)} unread · "
+                                        "recent headers below", fg=ACCENT)
+        else:
+            self.gmail_status.configure(text=gmail.get("error") or "Gmail not connected", fg=MUTED)
+        lines = []
+        for item in snapshot.get("messages") or []:
+            lines.append(f"{item.get('from') or 'Unknown sender'}\n"
+                         f"{item.get('subject') or '(no subject)'}\n"
+                         f"{item.get('date') or 'Date unavailable'}"
+                         f"{' · unread' if item.get('unread') else ''}")
+        content = "\n\n".join(lines) if lines else "No recent message headers available."
+        self.gmail_view.configure(state="normal")
+        self.gmail_view.delete("1.0", "end")
+        self.gmail_view.insert("1.0", content)
+        self.gmail_view.configure(state="disabled")
+
+    def _sign_in_gmail(self) -> None:
+        if self.gmail_busy:
+            return
+        client_id = self.gmail_client_var.get().strip()
+        if not client_id.endswith(".apps.googleusercontent.com"):
+            self.gmail_status.configure(text="Enter a Google Desktop OAuth client ID first", fg=AMBER)
+            return
+        self.gmail_busy = True
+        self.gmail_status.configure(text="Waiting for Google browser sign-in…", fg=AMBER)
+        def work() -> None:
+            try:
+                config = load_config()
+                config["google_oauth_client_id"] = client_id
+                CONFIG.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+                attempt = self.gmail_client.begin_authorization(client_id)
+                if not webbrowser.open(attempt.url):
+                    attempt.close()
+                    raise RuntimeError("Could not open the system browser")
+                self.gmail_client.finish_authorization(attempt)
+                self.results.put(("gmail_action", "Gmail connected; waiting for the next background refresh"))
+            except Exception as exc:
+                self.results.put(("gmail_action", f"Gmail connection failed: {exc}"))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _forget_gmail(self) -> None:
+        if self.gmail_busy:
+            return
+        self.gmail_busy = True
+        def work() -> None:
+            try:
+                self.gmail_client.forget()
+                self.results.put(("gmail_action", "Local Gmail account removed"))
+            except Exception as exc:
+                self.results.put(("gmail_action", f"Could not remove Gmail account: {exc}"))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _render_alerts(self) -> None:
+        alerts = (self.status or {}).get("notifications") or {}
+        items = alerts.get("items") or []
+        self.alerts_note.configure(text=f"{len(items)} current alert(s)" if self.status else
+                                   "Desktop service unavailable")
+        content = "\n\n".join(f"{item.get('title') or 'Alert'}\n{item.get('summary') or ''}"
+                               for item in items) if items else "Nothing needs attention."
+        self.alerts_view.configure(state="normal")
+        self.alerts_view.delete("1.0", "end")
+        self.alerts_view.insert("1.0", content)
+        self.alerts_view.configure(state="disabled")
 
     def _refresh_accounts(self) -> None:
         def work() -> None:
@@ -628,6 +682,10 @@ class SashmoDesktop(tk.Tk):
             self._refresh_projects()
         elif page == "accounts":
             self._refresh_accounts()
+        elif page == "alerts":
+            self._render_alerts()
+        elif page == "gmail":
+            self._render_gmail()
 
     def _action(self, action) -> None:
         if self.action_busy or self.closing:
@@ -684,12 +742,12 @@ class SashmoDesktop(tk.Tk):
         self.polling = False
         self.status = result
         self._render_status(error)
+        self._render_alerts()
+        self._render_gmail()
         if result:
             self.recovery_delay = 2.0
             self.next_recovery_at = 0.0
-        elif (self.auto_service and not self.action_busy
-              and (not self.controller.process or self.controller.process.poll() is not None)
-              and not self.controller.port_occupied()):
+        elif self.auto_service and not self.action_busy:
             now = time.monotonic()
             if now >= self.next_recovery_at:
                 self._action(self.controller.start)
@@ -718,6 +776,10 @@ class SashmoDesktop(tk.Tk):
                     self.account_status.configure(text=item[1], fg=ACCENT if "failed" not in item[1]
                                                   and "Could not" not in item[1] else AMBER)
                     self._refresh_accounts()
+                elif item[0] == "gmail_action":
+                    self.gmail_busy = False
+                    self.gmail_status.configure(text=item[1], fg=ACCENT if "failed" not in item[1]
+                                                and "Could not" not in item[1] else AMBER)
         except queue.Empty:
             pass
         self.after(100, self._drain_results)
@@ -821,7 +883,11 @@ class SashmoDesktop(tk.Tk):
             config["codex_poll_seconds"] = interval
             CONFIG.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
             set_autostart(self.autostart_var.get())
-            if self.controller.process and self.controller.process.poll() is None:
+            try:
+                managed = bool(send_service_command("status").get("managed"))
+            except RuntimeError:
+                managed = False
+            if managed:
                 self._action(self.controller.restart)
                 messagebox.showinfo("Sashmo settings", "Settings saved. Restarting the desktop service.")
             else:
@@ -833,11 +899,6 @@ class SashmoDesktop(tk.Tk):
         self.closing = True
         if self.poll_after_id:
             self.after_cancel(self.poll_after_id)
-        if self.controller.process and self.controller.process.poll() is None:
-            try:
-                self.controller.stop()
-            except Exception:
-                pass
         self.destroy()
 
 

@@ -12,7 +12,7 @@ constexpr size_t kRecordSamples = kSampleRate * 4;
 constexpr size_t kWavHeaderBytes = 44;
 constexpr size_t kMaxReplyBytes = 700000;
 
-enum class ScreenState { Idle, Listening, Processing, Speaking, Details, Disconnected, Error };
+enum class ScreenState { Idle, Listening, Processing, Speaking, Details, Notifications, Disconnected, Error };
 
 struct QuotaWindow {
   bool present = false;
@@ -25,6 +25,9 @@ ScreenState screenState = ScreenState::Disconnected;
 QuotaWindow windows[2];
 int windowCount = 0;
 int resetCredits = -1;
+int notificationCount = 0;
+String notificationTitle;
+String notificationSummary;
 int snapshotVersion = -1;
 String planReported;
 String clockText = "--:--";
@@ -138,6 +141,10 @@ void drawIdle() {
   M5.Display.setCursor(215, 154);
   M5.Display.print(WiFi.status() == WL_CONNECTED ? "Wi-Fi OK" : "Wi-Fi offline");
 
+  M5.Display.setCursor(12, 224);
+  M5.Display.setTextColor(notificationCount > 0 ? 0xFBE0 : 0xBDF7, 0x0841);
+  M5.Display.printf("ALERTS %d", notificationCount);
+
   M5.Display.fillCircle(160, 194, 30, 0x25F6);
   M5.Display.drawCircle(160, 194, 31, 0xBDF7);
   M5.Display.setTextColor(0xFFFF, 0x25F6);
@@ -184,6 +191,28 @@ void drawDetails() {
   M5.Display.print("TAP TO RETURN");
 }
 
+void drawNotifications() {
+  drawFrame();
+  M5.Display.setTextColor(0xFFFF, 0x18E3);
+  M5.Display.setTextSize(2);
+  M5.Display.setCursor(20, 48);
+  M5.Display.print("Alerts");
+  M5.Display.setTextSize(1);
+  M5.Display.setCursor(20, 86);
+  M5.Display.printf("%d current alert%s", notificationCount, notificationCount == 1 ? "" : "s");
+  M5.Display.setCursor(20, 109);
+  M5.Display.print(notificationCount > 0 ? notificationTitle.substring(0, 46) : "Nothing needs attention");
+  M5.Display.setCursor(20, 125);
+  M5.Display.print(notificationSummary.substring(0, 46));
+  if (notificationSummary.length() > 46) {
+    M5.Display.setCursor(20, 140);
+    M5.Display.print(notificationSummary.substring(46, 92));
+  }
+  M5.Display.setTextColor(0xBDF7, 0x0841);
+  M5.Display.setCursor(112, 216);
+  M5.Display.print("TAP TO RETURN");
+}
+
 void drawActivity(const char* title, const char* subtitle, uint16_t color) {
   drawFrame();
   M5.Display.setTextColor(color, 0x18E3);
@@ -202,6 +231,7 @@ void render() {
   switch (screenState) {
     case ScreenState::Idle: drawIdle(); break;
     case ScreenState::Details: drawDetails(); break;
+    case ScreenState::Notifications: drawNotifications(); break;
     case ScreenState::Listening: drawActivity("Listening", "Speak now", 0x7FEF); break;
     case ScreenState::Processing: drawActivity("Processing", "One moment", 0xFFE0); break;
     case ScreenState::Speaking: drawActivity("Speaking", "Playing reply", 0x7FEF); break;
@@ -281,6 +311,16 @@ void parsePulse(const String& payload) {
         ++windowCount;
       }
       break;
+    }
+    dirty = true;
+  }
+  if (doc["notification_count"].is<int>()) {
+    notificationCount = doc["notification_count"].as<int>();
+    notificationTitle = "";
+    notificationSummary = "";
+    for (JsonObject item : doc["notifications"].as<JsonArray>()) {
+      notificationTitle = String(item["title"] | "");
+      notificationSummary = String(item["summary"] | "");
     }
     dirty = true;
   }
@@ -508,8 +548,10 @@ void loop() {
       lastInteractionMs = now;
       applyPowerProfile();
       Serial.printf("TOUCH x=%d y=%d\n", touch.x, touch.y);
-      if (screenState == ScreenState::Details) {
+      if (screenState == ScreenState::Details || screenState == ScreenState::Notifications) {
         setState(ScreenState::Idle);
+      } else if (screenState == ScreenState::Idle && touch.y >= 205 && touch.x <= 100) {
+        setState(ScreenState::Notifications);
       } else if (screenState == ScreenState::Idle && touch.y >= 160 && touch.x >= 115 && touch.x <= 205) {
         pushToTalk();
       } else if (screenState == ScreenState::Idle && touch.y >= 34 && touch.y <= 147) {

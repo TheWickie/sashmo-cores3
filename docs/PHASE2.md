@@ -8,6 +8,7 @@ This document distinguishes code, desktop observations and physical device tests
 - The CoreS3 has shown a quota details screen on the physical display, and spoken replies through its speaker have been heard in earlier device tests.
 - With the DIN base switch ON and USB removed, physical tests confirmed the screen remained on, Wi-Fi pulses continued, and a voice request completed. On the revised firmware, the user heard a reply and saw a return to the main screen; the backend recorded a fresh voice request and battery-powered pulses with charging off. The user then rebooted it without USB and confirmed Wi-Fi and voice worked again. These are short tests, not a battery-runtime claim.
 - The firmware now requests an immediate pulse when Wi-Fi reconnects and has configurable USB, active-battery, idle-battery and low-battery brightness. This revision compiled, flashed successfully and passed the short unplugged voice test.
+- An independent per-user Windows service host now owns the backend. In a live migration, the old dashboard closed, the host took over, the CoreS3 resumed pulses, and the host restarted the backend after a forced process exit. The host is registered for Windows sign-in; closing the dashboard no longer stops the backend.
 - The active text response provider remains local until a user signs in through Sashmo and explicitly selects an available ChatGPT model. The subscription-backed path is implemented but has not been live-authorized or tested on this account.
 
 ## Milestone 1: standalone battery operation
@@ -42,10 +43,15 @@ The local service caches external Codex data independently of device pulses. USB
 - Public source availability alone does not establish that a specific account can use subscription-backed inference. Verify the documented OAuth scopes and actual account response before enabling it.
 - Speech API use is optional and may be billed. Billed text inference is not configured or used.
 - Device actions remain read-only until an explicit action-permission design and user approval are in place.
+- The device link is authenticated HTTP on the trusted private LAN. Android/Tailscale access, remote email exposure and powerful Codex actions require a transport-security and permission review before enabling them.
 
 ## ChatGPT plan conversation
 
 The Windows dashboard has a ChatGPT page with a system-browser sign-in button, saved account selection, current model discovery and an explicit model enable action. Credentials are protected for the current Windows user with DPAPI in LocalAppData. The CoreS3 never receives them. The text provider uses only an account's authorized ChatGPT plan token, requires a model reported by that account, and sends Responses requests with `store=false` and `stream=true`. Unknown voice questions use this provider only after the user signs in and selects a model; quota, reset, time and connection answers stay local. A plan error gives an error reply and never switches to the speech API key for text inference. Conversation context is held in desktop memory for up to 30 minutes and is not durable memory. The browser consent, model list and a real conversational reply still need live verification.
+
+## Gmail and alerts
+
+The optional Gmail connector uses a separate Google Desktop OAuth flow and requests only `gmail.metadata`. It can cache an unread count and up to ten recent message headers; it cannot read bodies or use Gmail search with this scope. Metadata polling is independent of CoreS3 pulses. The desktop page displays the cached headers. A voice request for email uses only the cached snapshot and local Windows speech, so message metadata is not sent to Cedar or the ChatGPT text provider. Gmail browser consent has not happened; a Google Desktop OAuth client ID and possibly Google's restricted-scope verification are outstanding. The alert store currently covers low battery only. The alert UI firmware compiled, flashed with verified hash, and reconnected via Wi-Fi; the new alert screen itself has not yet been checked by touch on the physical display.
 
 ## Approved project registry
 

@@ -42,3 +42,16 @@ def test_plan_conversation_keeps_bounded_context_without_actions(tmp_path):
         {"role": "user", "content": "Tell me another."},
     ]
     assert "no tools" in messages[0]["content"].lower()
+
+
+def test_mail_answers_use_cached_metadata_and_local_voice_only(tmp_path):
+    class State:
+        gmail_snapshot = {"unread_count": 3, "messages": [
+            {"from": "Example Sender", "subject": "Example Subject"}]}
+    client = FakePlanClient()
+    provider = ConversationProvider(tmp_path / "projects.local.json", client=client, state=State())
+    reply = asyncio.run(provider.respond("What is my latest email?", None, False))
+    assert "Example Sender" in reply
+    assert provider.sensitive_output is True
+    assert provider.last_source == "local"
+    assert client.requests == []

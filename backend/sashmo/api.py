@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from .conversation import ConversationProvider
+from .gmail import GmailWorker
 from .projects import ProjectRegistry
 from .speech import process_audio, validate_wav
 from .state import QuotaWorker, StateStore
@@ -53,18 +54,23 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
     telemetry_path = Path(__file__).resolve().parents[2] / "work" / "battery-history.csv"
     store = state or StateStore(telemetry_path=telemetry_path if start_worker else None)
     voice_provider = conversation or (ConversationProvider(Path(__file__).resolve().parents[2] /
-                                                          "projects.local.json") if start_worker else None)
+                                                          "projects.local.json", state=store) if start_worker else None)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         worker = QuotaWorker(store, config.codex_poll_seconds) if start_worker else None
+        gmail_worker = GmailWorker(store) if start_worker else None
         if worker:
             await worker.start()
+        if gmail_worker:
+            await gmail_worker.start()
         try:
             yield
         finally:
             if worker:
                 await worker.stop()
+            if gmail_worker:
+                await gmail_worker.stop()
 
     app = FastAPI(title="Sashmo", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.store = store

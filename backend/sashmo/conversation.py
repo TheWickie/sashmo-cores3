@@ -21,12 +21,15 @@ _GUIDANCE = ("You are Sashmo, a concise spoken assistant. Answer in at most 45 w
 
 
 class ConversationProvider:
-    def __init__(self, project_file: Path, client: SIWCClient | None = None) -> None:
+    def __init__(self, project_file: Path, client: SIWCClient | None = None,
+                 state: Any | None = None) -> None:
         self.registry = ProjectRegistry(project_file)
         self.client = client
+        self.state = state
         self.turns: deque[dict[str, str]] = deque(maxlen=12)
         self.last_turn_at = 0.0
         self.last_source = "local"
+        self.sensitive_output = False
         self._lock = asyncio.Lock()
 
     def _siwc(self) -> SIWCClient | None:
@@ -62,9 +65,30 @@ class ConversationProvider:
             return "I can check an approved project's branch and whether it has uncommitted changes. Which one?"
         return None
 
+    def _mail_answer(self, transcript: str) -> str | None:
+        utterance = transcript.casefold()
+        if not re.search(r"\b(mail|email|emails|inbox)\b", utterance):
+            return None
+        self.sensitive_output = True
+        snapshot = getattr(self.state, "gmail_snapshot", None)
+        if snapshot is None:
+            return "Gmail is not connected. You can connect it in Sashmo on Windows."
+        count = snapshot.get("unread_count")
+        if re.search(r"\b(latest|recent|newest)\b", utterance):
+            messages = snapshot.get("messages") or []
+            if messages:
+                latest = messages[0]
+                sender = str(latest.get("from") or "an unknown sender")[:80]
+                subject = str(latest.get("subject") or "no subject")[:100]
+                return f"The latest inbox message is from {sender}, about {subject}. I can only read headers right now."
+        return f"You have {count} unread inbox messages." if count is not None else "Gmail status is unavailable."
+
     async def respond(self, transcript: str, quota: dict[str, Any] | None, connected: bool) -> str:
         async with self._lock:
-            local = self._local_command(transcript, quota, connected)
+            self.sensitive_output = False
+            local = self._mail_answer(transcript)
+            if local is None:
+                local = self._local_command(transcript, quota, connected)
             if local is None:
                 local = await self._project_answer(transcript)
             if local is not None:

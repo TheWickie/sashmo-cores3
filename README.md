@@ -46,13 +46,17 @@ powershell -ExecutionPolicy Bypass -File .\flash_sashmo.ps1 -Port COM4
 
 Change `COM4` to the detected device port. The script creates a private firmware header, builds or uploads, then removes the header. Reflash when the Wi-Fi name, password, device token, server address or firmware power settings change.
 
-Double-click `Sashmo.cmd` to open the Windows dashboard. It starts and monitors the local service. The Overview shows reported Codex quota, the last CoreS3 check-in, battery, charging, Wi-Fi signal and voice readiness. Settings includes the Codex refresh interval and optional launch at Windows sign-in. Diagnostics shows service output without credentials or transcripts. Closing the dashboard stops a service that it started.
+Double-click `Sashmo.cmd` to open the Windows dashboard. It starts or connects to an independent local service host. The Overview shows reported Codex quota, the last CoreS3 check-in, battery, charging, Wi-Fi signal and voice readiness. Settings includes the Codex refresh interval and backend startup at Windows sign-in. Diagnostics shows service output without credentials or transcripts. **Closing the dashboard leaves the backend running.** The host restarts a crashed backend; use the dashboard's Stop service control when you explicitly want to stop it.
 
 Use the Projects page to add Git repositories that Sashmo may inspect. Its read-only status view shows branch, uncommitted changes and last commit. Approved paths stay in the ignored `projects.local.json`; no project is inspected before you add it.
+
+The Gmail page supports a separate Google Desktop OAuth client ID and browser consent. The current connector requests Gmail metadata only and shows recent sender, subject, date and unread count. It does not read bodies, search, send or modify mail. Google classifies this scope as restricted; public distribution may require Google verification. Gmail remains disconnected until you provide a client ID and complete consent.
 
 Tap the microphone control on the CoreS3 and speak within the listening window. The current read-only questions cover quota, reset time, time, date and connection status. Tap the quota card for details and tap again to return. Voice and status use Wi-Fi; USB is needed for charging, flashing and optional serial diagnostics only.
 
 If the PC's LAN address or service port changes, update `config.local.json` and reflash the CoreS3. Reserving the PC's address in the home router is a practical way to keep the current connection stable. Hostname or mDNS discovery is a future improvement.
+
+The CoreS3 link currently uses authenticated HTTP on a trusted private LAN. Before Android/Tailscale access or more powerful Codex actions, the transport and permission design must be reviewed and upgraded. Do not expose the local service port to the internet.
 
 ## Development
 

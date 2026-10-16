@@ -71,3 +71,16 @@ def test_projects_endpoint_requires_device_token():
         response = client.get("/v1/projects", headers={"X-Sashmo-Token": "x" * 32})
         assert response.status_code == 200
         assert set(response.json()) == {"projects", "error"}
+
+
+def test_low_battery_notification_is_deduplicated_and_cleared():
+    state = StateStore()
+    state.record_device(14, False, False, -55)
+    first_version = state.version
+    assert state.pulse(-1)["notification_count"] == 1
+    assert state.pulse(-1)["notifications"][0]["title"] == "Low battery"
+    state.record_device(14, False, False, -55)
+    assert state.version == first_version
+    state.record_device(16, True, True, -55)
+    assert state.status()["notifications"]["count"] == 0
+    assert state.version == first_version + 1

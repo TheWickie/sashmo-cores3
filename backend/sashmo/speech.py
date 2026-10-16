@@ -164,7 +164,9 @@ async def process_audio(data: bytes, quota: dict[str, Any] | None, connected: bo
         answer = "Sorry, I didn't catch that. Please tap the microphone and try again."
     else:
         answer = await (provider or ReadOnlyCommandProvider()).respond(transcript, quota, connected)
-    audio = await synthesize_reply(answer)
+    audio = (await asyncio.to_thread(synthesize, answer)
+             if provider and getattr(provider, "sensitive_output", False)
+             else await synthesize_reply(answer))
     return transcript or "", answer, audio
 
 

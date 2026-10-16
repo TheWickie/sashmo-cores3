@@ -28,6 +28,9 @@ class StateStore:
         self.voice_state = "idle"
         self.voice_provider = "local"
         self.last_voice_local: str | None = None
+        self.notifications: list[dict[str, str]] = []
+        self.gmail_snapshot: dict[str, Any] | None = None
+        self.gmail_error: str | None = "Not connected"
         self.telemetry_path = telemetry_path
 
     def update(self, quota: dict[str, Any] | None, connected: bool, error: str | None) -> None:
@@ -50,7 +53,38 @@ class StateStore:
             "codex_connected": self.codex_connected,
             "error": self.error,
             "last_updated_local": self.last_updated_local,
+            "notification_count": len(self.notifications),
+            "notifications": self.notifications[-3:],
+            "gmail_unread_count": (self.gmail_snapshot or {}).get("unread_count"),
         }
+
+    def update_gmail(self, snapshot: dict[str, Any] | None, error: str | None) -> None:
+        previous_count = (self.gmail_snapshot or {}).get("unread_count")
+        new_count = (snapshot or {}).get("unread_count")
+        if snapshot is not None:
+            self.gmail_snapshot = snapshot
+        elif error == "Not connected":
+            self.gmail_snapshot = None
+            new_count = None
+        self.gmail_error = error
+        if new_count != previous_count:
+            self.version += 1
+
+    def notify(self, key: str, title: str, summary: str) -> None:
+        """Replace one local alert by stable key; do not include credentials or transcripts."""
+        item = {"key": key[:64], "title": title[:60], "summary": summary[:120]}
+        if any(existing == item for existing in self.notifications):
+            return
+        self.notifications = [entry for entry in self.notifications if entry["key"] != item["key"]]
+        self.notifications.append(item)
+        self.notifications = self.notifications[-10:]
+        self.version += 1
+
+    def clear_notification(self, key: str) -> None:
+        remaining = [entry for entry in self.notifications if entry["key"] != key]
+        if len(remaining) != len(self.notifications):
+            self.notifications = remaining
+            self.version += 1
 
     def record_device(self, battery: int | None, charging: bool | None,
                       usb: bool | None, wifi_rssi: int | None) -> None:
@@ -59,6 +93,10 @@ class StateStore:
         self.device_charging = charging
         self.device_usb_powered = usb
         self.device_wifi_rssi = wifi_rssi if wifi_rssi is not None and -120 <= wifi_rssi <= 0 else None
+        if usb is False and battery is not None and battery <= 15:
+            self.notify("battery_low", "Low battery", f"CoreS3 battery is at {battery}%.")
+        elif usb is True or (battery is not None and battery > 20):
+            self.clear_notification("battery_low")
         if self.telemetry_path is not None:
             try:
                 self.telemetry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -90,6 +128,9 @@ class StateStore:
                        "wifi_rssi": self.device_wifi_rssi},
             "voice": {"state": self.voice_state, "last_request_local": self.last_voice_local,
                       "provider": self.voice_provider},
+            "notifications": {"count": len(self.notifications), "items": self.notifications},
+            "gmail": {"connected": self.gmail_snapshot is not None and self.gmail_error is None,
+                      "error": self.gmail_error, "snapshot": self.gmail_snapshot},
         }
 
 
