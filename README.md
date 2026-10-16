@@ -65,6 +65,7 @@ Change `COM4` to the detected device port. The script creates a private firmware
 Double-click `Sashmo.cmd` to open the Windows dashboard. It starts or connects to an independent local service host. The Overview shows reported Codex quota, the last CoreS3 check-in, battery, charging, Wi-Fi signal and voice readiness. Settings includes the Codex refresh interval and backend startup at Windows sign-in. Diagnostics shows service output without credentials or transcripts. **Closing the dashboard leaves the backend running.** The host restarts a crashed backend; use the dashboard's Stop service control when you explicitly want to stop it.
 
 The Overview also shows a count of recent Codex task states from the documented App Server read methods. These generic summaries contain no task title, prompt, working directory or project path.
+You can ask “What's Codex doing?” for a spoken count of active and completed tasks among the five recent tasks Sashmo can see. Open Codex itself for task details.
 
 Use the Projects page to add Git repositories that Sashmo may inspect. Its read-only status view shows branch, uncommitted changes and last commit. Approved paths stay in the ignored `projects.local.json`; no project is inspected before you add it.
 
@@ -78,7 +79,7 @@ Tap the microphone control on the CoreS3 and speak within the listening window. 
 
 If the PC's LAN address or service port changes, update `config.local.json` and reflash the CoreS3. Reserving the PC's address in the home router is a practical way to keep the current connection stable. Hostname or mDNS discovery is a future improvement.
 
-The CoreS3 link currently uses authenticated HTTP on a trusted private LAN. Before Android/Tailscale access or more powerful Codex actions, the transport and permission design must be reviewed and upgraded. Do not expose the local service port to the internet.
+The CoreS3 link currently uses authenticated HTTP on a trusted private LAN. Rich dashboard status is restricted to connections from the backend PC, but the device token and voice audio still travel over HTTP. Before Android/Tailscale access or more powerful Codex actions, the transport and permission design must be upgraded and tested. Do not expose the local service port to the internet. See the [private LAN security review](docs/SECURITY_REVIEW.md).
 
 ## Development
 

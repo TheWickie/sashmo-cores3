@@ -70,3 +70,16 @@ def test_calendar_answers_stay_local_and_do_not_invoke_plan(tmp_path):
     assert provider.sensitive_output is True
     assert provider.last_source == "local"
     assert client.requests == []
+
+
+def test_codex_activity_answer_uses_bounded_status_without_plan(tmp_path):
+    class State:
+        codex_sessions_error = None
+        codex_sessions = [{"label": "Codex task 1", "state": "in_progress"},
+                          {"label": "Codex task 2", "state": "completed"}]
+    client = FakePlanClient()
+    provider = ConversationProvider(tmp_path / "projects.local.json", client=client, state=State())
+    reply = asyncio.run(provider.respond("What's Codex doing?", None, True))
+    assert "1 is active" in reply
+    assert "2 recent Codex tasks" in reply
+    assert client.requests == []

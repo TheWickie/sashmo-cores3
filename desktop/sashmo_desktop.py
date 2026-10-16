@@ -9,6 +9,7 @@ import re
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tkinter as tk
@@ -39,6 +40,7 @@ KEY_FILE = ROOT / "openAIAPIKey.txt"
 LOG_FILE = ROOT / "work" / "desktop-service.log"
 PROJECTS_FILE = ROOT / "projects.local.json"
 APP_NAME = "Sashmo"
+_CONFIG_WRITE_LOCK = threading.RLock()
 
 BG = "#0a1220"
 PANEL = "#111e30"
@@ -56,12 +58,24 @@ def load_config() -> dict:
     return json.loads(CONFIG.read_text(encoding="utf-8"))
 
 
-def save_config(config: dict) -> None:
-    """Keep the private configuration valid across interrupted GUI writes."""
-    temp = ROOT / "work" / "config.local.json.tmp"
-    temp.parent.mkdir(parents=True, exist_ok=True)
-    temp.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-    os.replace(temp, CONFIG)
+def update_config(changes: dict) -> None:
+    """Atomically merge dashboard settings without losing parallel OAuth edits."""
+    with _CONFIG_WRITE_LOCK:
+        config = load_config()
+        config.update(changes)
+        temp_dir = ROOT / "work"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(prefix="sashmo-config-", suffix=".tmp", dir=temp_dir)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(config, stream, indent=2)
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temp_name, CONFIG)
+        finally:
+            if os.path.exists(temp_name):
+                os.unlink(temp_name)
 
 
 def _local_datetime(value: str | None) -> str:
@@ -454,9 +468,7 @@ class SashmoDesktop(tk.Tk):
         self.gmail_status.configure(text="Waiting for Google browser sign-in…", fg=AMBER)
         def work() -> None:
             try:
-                config = load_config()
-                config["google_oauth_client_id"] = client_id
-                save_config(config)
+                update_config({"google_oauth_client_id": client_id})
                 attempt = self.gmail_client.begin_authorization(client_id)
                 if not webbrowser.open(attempt.url):
                     attempt.close()
@@ -535,9 +547,7 @@ class SashmoDesktop(tk.Tk):
         self.calendar_status.configure(text="Waiting for Google browser sign-in…", fg=AMBER)
         def work() -> None:
             try:
-                config = load_config()
-                config["google_oauth_client_id"] = client_id
-                save_config(config)
+                update_config({"google_oauth_client_id": client_id})
                 attempt = self.calendar_client.begin_authorization(client_id)
                 if not webbrowser.open(attempt.url):
                     attempt.close()
@@ -990,9 +1000,7 @@ class SashmoDesktop(tk.Tk):
             interval = int(self.poll_var.get())
             if not 30 <= interval <= 3600:
                 raise ValueError("Codex refresh must be between 30 and 3600 seconds")
-            config = load_config()
-            config["codex_poll_seconds"] = interval
-            save_config(config)
+            update_config({"codex_poll_seconds": interval})
             set_autostart(self.autostart_var.get())
             try:
                 managed = bool(send_service_command("status").get("managed"))

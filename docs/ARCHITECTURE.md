@@ -17,11 +17,11 @@ Only actual reported usage windows are included. Durations and reset timestamps 
 All routes require `X-Sashmo-Token` matching the random token in `config.local.json`. The device includes the token in firmware at build time. The HTTP service binds to the configured private IPv4 address.
 
 - `GET /v1/pulse?since=<version>&battery=<percent>&charging=<bool>&usb=<bool>&wifi_rssi=<dBm>`: records bounded device telemetry and always returns `version`, `time`, and `date`. When `since` differs, also returns cached quota, connection state, alert count/latest alerts, Gmail unread count and Calendar event count. Device telemetry is appended to ignored `work/battery-history.csv`; it does not trigger external polling.
-- `GET /v1/status`: returns service, Codex, device, voice, Gmail metadata, Calendar events and alert status for the Windows dashboard. It uses the same authentication requirement and never returns a password, token or transcript.
+- `GET /v1/status`: returns service, Codex, device, voice, Gmail metadata, Calendar events and alert status for the Windows dashboard. It requires the token and a connection originating from the backend PC. It never returns a password, token or transcript.
 - `GET /v1/projects`: reports only registered project display names and bounded Git summaries. Project paths remain in ignored `projects.local.json` on the PC.
 - `POST /v1/voice`: request body is at most six seconds of 16 kHz mono, 16-bit PCM WAV. Response is mono PCM WAV at 24 kHz from the API or 16 kHz from local fallback. Audio is accepted only for authenticated requests and bounded in size. Transcription text and the API key are never returned to the device or written to the service log.
 
-There is no TLS on this private LAN link. The bearer token protects access but should be considered observable by a party with network capture or physical firmware access. Do not expose the configured service port to the internet. Before an Android/Tailscale relay, remote email data or powerful Codex actions, review and upgrade transport security and action permissions.
+There is no TLS on this private LAN link. The bearer token protects access but should be considered observable by a party with network capture or physical firmware access. The local source-address gate on dashboard endpoints is not a substitute for encrypted transport. Do not expose the configured service port to the internet. See [SECURITY_REVIEW.md](SECURITY_REVIEW.md) for the required controls before an Android/Tailscale relay, remote email data or powerful Codex actions.
 
 ## Voice path
 

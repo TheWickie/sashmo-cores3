@@ -29,7 +29,7 @@ def test_voice_rejects_non_wav():
 def test_status_reports_authenticated_device_telemetry_without_changing_quota_version():
     state = StateStore()
     app = create_app(Config("192.168.1.10", 8765, "x" * 32), start_worker=False, state=state)
-    with TestClient(app) as client:
+    with TestClient(app, client=("192.168.1.10", 50000)) as client:
         assert client.get("/v1/status").status_code == 401
         headers = {"X-Sashmo-Token": "x" * 32}
         pulse = client.get("/v1/pulse?since=-1&battery=42&charging=1&usb=1&wifi_rssi=-51", headers=headers)
@@ -66,11 +66,20 @@ def test_battery_history_records_authenticated_pulses_only(tmp_path):
 
 def test_projects_endpoint_requires_device_token():
     app = create_app(Config("192.168.1.10", 8765, "x" * 32), start_worker=False)
-    with TestClient(app) as client:
+    with TestClient(app, client=("192.168.1.10", 50000)) as client:
         assert client.get("/v1/projects").status_code == 401
         response = client.get("/v1/projects", headers={"X-Sashmo-Token": "x" * 32})
         assert response.status_code == 200
         assert set(response.json()) == {"projects", "error"}
+
+
+def test_personal_dashboard_endpoints_reject_authenticated_lan_device():
+    app = create_app(Config("192.168.1.10", 8765, "x" * 32), start_worker=False)
+    with TestClient(app, client=("192.168.1.44", 50000)) as client:
+        headers = {"X-Sashmo-Token": "x" * 32}
+        assert client.get("/v1/pulse", headers=headers).status_code == 200
+        assert client.get("/v1/status", headers=headers).status_code == 403
+        assert client.get("/v1/projects", headers=headers).status_code == 403
 
 
 def test_low_battery_notification_is_deduplicated_and_cleared():

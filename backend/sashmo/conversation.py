@@ -112,12 +112,32 @@ class ConversationProvider:
         day_label = "Tomorrow" if target else "Coming up"
         return day_label + ": " + "; ".join(events[:2]) + ("; and more." if len(events) > 2 else ".")
 
+    def _codex_activity_answer(self, transcript: str) -> str | None:
+        utterance = transcript.casefold()
+        if "codex" not in utterance or not re.search(r"\b(doing|working|busy|active|tasks?|activity)\b", utterance):
+            return None
+        if getattr(self.state, "codex_sessions_error", None):
+            return "Recent Codex task status is unavailable right now. Check Sashmo on Windows."
+        items = getattr(self.state, "codex_sessions", []) or []
+        if not items:
+            return "I found no recent Codex tasks."
+        active = sum(item.get("state") == "in_progress" for item in items)
+        completed = sum(item.get("state") == "completed" for item in items)
+        if active:
+            return (f"Among the {len(items)} recent Codex tasks I can see, {active} "
+                    f"{'is' if active == 1 else 'are'} active and {completed} completed. "
+                    "Open Codex for task details.")
+        return (f"None of the {len(items)} recent Codex tasks I can see is active. "
+                f"{completed} completed. Open Codex for task details.")
+
     async def respond(self, transcript: str, quota: dict[str, Any] | None, connected: bool) -> str:
         async with self._lock:
             self.sensitive_output = False
             local = self._mail_answer(transcript)
             if local is None:
                 local = self._calendar_answer(transcript)
+            if local is None:
+                local = self._codex_activity_answer(transcript)
             if local is None:
                 local = self._local_command(transcript, quota, connected)
             if local is None:

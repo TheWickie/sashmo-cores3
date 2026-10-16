@@ -85,6 +85,18 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
         if not value or not secrets.compare_digest(value, config.device_token):
             raise HTTPException(status_code=401, detail="Unauthorized")
 
+    def local_dashboard_only(request: Request) -> None:
+        """Keep personal dashboard snapshots off the device-facing LAN API."""
+        peer = request.client.host if request.client else ""
+        try:
+            address = ipaddress.ip_address(peer)
+            if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+                address = address.ipv4_mapped
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Desktop only") from None
+        if str(address) != config.bind_host:
+            raise HTTPException(status_code=403, detail="Desktop only")
+
     @app.get("/v1/pulse")
     async def pulse(since: int = -1, battery: int | None = None, charging: bool | None = None,
                     usb: bool | None = None, wifi_rssi: int | None = None,
@@ -94,13 +106,15 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
         return JSONResponse(store.pulse(since))
 
     @app.get("/v1/status")
-    async def status(x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
+    async def status(request: Request, x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
         authenticate(x_sashmo_token)
+        local_dashboard_only(request)
         return JSONResponse(store.status(), headers={"Cache-Control": "no-store"})
 
     @app.get("/v1/projects")
-    async def projects(x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
+    async def projects(request: Request, x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
         authenticate(x_sashmo_token)
+        local_dashboard_only(request)
         registry = ProjectRegistry(Path(__file__).resolve().parents[2] / "projects.local.json")
         result = await run_in_threadpool(registry.list_projects)
         return JSONResponse(result, headers={"Cache-Control": "no-store"})
