@@ -53,6 +53,34 @@ def test_silent_follow_up_returns_no_audio(monkeypatch):
     assert options == [True]
 
 
+def test_voice_volume_command_returns_device_setting_header(monkeypatch, tmp_path):
+    import sashmo.speech as speech_module
+    from sashmo.conversation import ConversationProvider
+
+    async def spoken_volume(_audio):
+        return "Set volume to 30 percent", 1.0
+
+    async def spoken_reply(_answer):
+        return b"audio"
+
+    monkeypatch.setattr(speech_module, "transcribe", spoken_volume)
+    monkeypatch.setattr(speech_module, "synthesize_reply", spoken_reply)
+    provider = ConversationProvider(tmp_path / "projects.local.json")
+    payload = io.BytesIO()
+    with wave.open(payload, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(16000)
+        writer.writeframes(b"\0\0" * 16000)
+    app = create_app(Config("192.168.1.10", 8765, "x" * 32), start_worker=False,
+                     conversation=provider)
+    with TestClient(app) as client:
+        response = client.post("/v1/voice", headers={"X-Sashmo-Token": "x" * 32},
+                               content=payload.getvalue())
+    assert response.status_code == 200
+    assert response.headers["X-Sashmo-Volume-Percent"] == "30"
+
+
 def test_wake_audio_is_authenticated_bounded_and_local(monkeypatch):
     import sashmo.api as api_module
     recognized = []

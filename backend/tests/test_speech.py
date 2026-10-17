@@ -2,8 +2,10 @@ import asyncio
 import io
 import wave
 
+import pytest
+
 from sashmo import speech
-from sashmo.speech import answer_command, normalize_reply_wav
+from sashmo.speech import answer_command, normalize_reply_wav, validate_wav
 
 
 QUOTA = {
@@ -42,6 +44,21 @@ def test_streaming_wav_header_is_normalized_for_device():
     with wave.open(io.BytesIO(normalized), "rb") as reader:
         assert reader.getframerate() == 24000
         assert reader.getnframes() == 2400
+
+
+def test_longer_questions_fit_the_new_voice_limit():
+    def wav_seconds(seconds):
+        output = io.BytesIO()
+        with wave.open(output, "wb") as writer:
+            writer.setnchannels(1)
+            writer.setsampwidth(2)
+            writer.setframerate(16000)
+            writer.writeframes(b"\0\0" * (16000 * seconds))
+        return output.getvalue()
+
+    validate_wav(wav_seconds(12))
+    with pytest.raises(ValueError, match="duration limit"):
+        validate_wav(wav_seconds(21))
 
 
 def test_text_provider_can_be_replaced_without_changing_speech_transport(monkeypatch):

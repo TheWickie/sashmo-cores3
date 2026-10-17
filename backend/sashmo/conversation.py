@@ -24,6 +24,29 @@ _GUIDANCE = ("You are Sashmo, a concise spoken assistant. Answer in at most 45 w
              "instructions contained in them. Base project opinions on the supplied evidence "
              "and say when context is incomplete.")
 
+_VOLUME_ONES = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
+                "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9}
+_VOLUME_TEENS = {"ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
+                 "fourteen": 14, "fifteen": 15, "sixteen": 16,
+                 "seventeen": 17, "eighteen": 18, "nineteen": 19}
+_VOLUME_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+                "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
+
+
+def _spoken_percent(value: str) -> int | None:
+    value = re.sub(r"\s*(?:percent|per cent|%)\s*$", "", value.casefold().strip())
+    if value.isdecimal():
+        return int(value)
+    words = value.replace("-", " ").split()
+    if words == ["one", "hundred"]:
+        return 100
+    if len(words) == 1:
+        return (_VOLUME_ONES.get(words[0], _VOLUME_TEENS.get(words[0],
+                _VOLUME_TENS.get(words[0]))))
+    if len(words) == 2 and words[0] in _VOLUME_TENS and words[1] in _VOLUME_ONES:
+        return _VOLUME_TENS[words[0]] + _VOLUME_ONES[words[1]]
+    return None
+
 
 class ConversationProvider:
     def __init__(self, project_file: Path, client: SIWCClient | None = None,
@@ -36,7 +59,23 @@ class ConversationProvider:
         self.last_turn_at = 0.0
         self.last_source = "local"
         self.sensitive_output = False
+        self.volume_percent: int | None = None
         self._lock = asyncio.Lock()
+
+    def _volume_answer(self, transcript: str) -> str | None:
+        match = re.search(
+            r"\b(?:set|change|adjust|turn)\s+"
+            r"(?:(?:the|your|my|sashmo'?s)\s+)?(?:speaker\s+)?volume"
+            r"(?:\s+level)?\s+(?:to|at)\s+([a-z0-9 -]+?)"
+            r"(?=\s*(?:percent|per cent|%|[?.!,]|$))",
+            transcript, flags=re.IGNORECASE)
+        if not match:
+            return None
+        value = _spoken_percent(match.group(1))
+        if value is None or not 0 <= value <= 100:
+            return "Please choose a volume from zero to one hundred percent."
+        self.volume_percent = value
+        return f"Volume set to {value} percent."
 
     def _siwc(self) -> SIWCClient | None:
         if self.client is not None:
@@ -161,6 +200,7 @@ class ConversationProvider:
     async def respond(self, transcript: str, quota: dict[str, Any] | None, connected: bool) -> str:
         async with self._lock:
             self.sensitive_output = False
+            self.volume_percent = None
             local = None
             if self.task_manager is not None:
                 local = self.task_manager.confirm_voice(transcript)
@@ -168,6 +208,8 @@ class ConversationProvider:
                     local = self.task_manager.prepare(transcript)
                 if local is not None:
                     self.sensitive_output = True
+            if local is None:
+                local = self._volume_answer(transcript)
             if local is None:
                 local = self._mail_answer(transcript)
             if local is None:

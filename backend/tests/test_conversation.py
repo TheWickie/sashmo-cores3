@@ -55,6 +55,28 @@ def test_time_word_in_general_question_does_not_hijack_plan_conversation(tmp_pat
     assert len(client.requests) == 1
 
 
+def test_volume_command_is_local_and_exposes_only_valid_percent(tmp_path):
+    client = FakePlanClient()
+    provider = ConversationProvider(tmp_path / "projects.local.json", client=client)
+    assert asyncio.run(provider.respond("Set volume to forty five percent", None, True)) == (
+        "Volume set to 45 percent.")
+    assert provider.volume_percent == 45
+    assert provider.last_source == "local"
+    assert client.requests == []
+    assert "zero to one hundred" in asyncio.run(provider.respond(
+        "Set volume to 150 percent", None, True))
+    assert provider.volume_percent is None
+    assert asyncio.run(provider.respond("Set volume to 0%", None, True)) == (
+        "Volume set to 0 percent.")
+    assert provider.volume_percent == 0
+    assert asyncio.run(provider.respond("Can you set your volume to 40 percent?", None, True)) == (
+        "Volume set to 40 percent.")
+    assert provider.volume_percent == 40
+    assert asyncio.run(provider.respond("Please adjust the speaker volume at 55%", None, True)) == (
+        "Volume set to 55 percent.")
+    assert provider.volume_percent == 55
+
+
 def test_mail_answers_use_cached_metadata_and_local_voice_only(tmp_path):
     class State:
         gmail_snapshot = {"unread_count": 3, "messages": [

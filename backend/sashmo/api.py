@@ -153,10 +153,10 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
     async def voice(request: Request, x_sashmo_token: str | None = Header(default=None)) -> Response:
         authenticate(x_sashmo_token)
         content_length = request.headers.get("content-length")
-        if content_length and int(content_length) > 200_000:
+        if content_length and int(content_length) > 650_000:
             raise HTTPException(status_code=413, detail="Audio too large")
         audio = await request.body()
-        if len(audio) > 200_000:
+        if len(audio) > 650_000:
             raise HTTPException(status_code=413, detail="Audio too large")
         try:
             validate_wav(audio)
@@ -178,10 +178,15 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
         LOG.info("Voice request completed (recognized=%s, response_bytes=%d)", bool(transcript), len(output))
         if follow_up and not transcript:
             return Response(status_code=204, headers={"Cache-Control": "no-store"})
+        headers = {"X-Sashmo-Recognized": "1" if transcript else "0",
+                   "Cache-Control": "no-store"}
+        volume = getattr(voice_provider, "volume_percent", None)
+        if volume is not None:
+            headers["X-Sashmo-Volume-Percent"] = str(volume)
         return Response(
             output,
             media_type="audio/wav",
-            headers={"X-Sashmo-Recognized": "1" if transcript else "0", "Cache-Control": "no-store"},
+            headers=headers,
         )
 
     @app.post("/v1/wake")

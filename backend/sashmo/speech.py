@@ -38,7 +38,7 @@ class ReadOnlyCommandProvider:
         return answer_command(transcript, quota, connected)
 
 
-def validate_wav(data: bytes, max_seconds: int = 6) -> None:
+def validate_wav(data: bytes, max_seconds: int = 20) -> None:
     if len(data) > 16000 * 2 * max_seconds + 4096:
         raise ValueError("Audio exceeds the duration limit")
     try:

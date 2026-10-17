@@ -2,6 +2,7 @@
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <M5Unified.h>
+#include <Preferences.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
 
@@ -9,13 +10,16 @@
 #include "splash_image.h"
 
 constexpr uint32_t kSampleRate = 16000;
-constexpr size_t kRecordSamples = kSampleRate * 6;
+constexpr size_t kRecordSamples = kSampleRate * 20;
+constexpr size_t kRecordChunkSamples = kSampleRate / 4;
+constexpr size_t kStartTimeoutSamples = kSampleRate * 6;
+constexpr int kEndSilenceChunks = 10;
 constexpr size_t kWakeSamples = kSampleRate * 2;
 constexpr size_t kWakeTailSamples = kSampleRate;
 constexpr size_t kWavHeaderBytes = 44;
 constexpr size_t kMaxReplyBytes = 700000;
 
-enum class ScreenState { Idle, Listening, Processing, Speaking, Details, Notifications, Disconnected, Error };
+enum class ScreenState { Idle, Listening, Processing, Speaking, Details, Notifications, Volume, Disconnected, Error };
 
 struct QuotaWindow {
   bool present = false;
@@ -53,6 +57,7 @@ bool wifiWasConnected = false;
 uint32_t lastInteractionMs = 0;
 uint8_t appliedBrightness = 0;
 bool displaySleeping = false;
+int volumePercent = 63;
 int16_t* wakeSamples = nullptr;
 int16_t* wakeTail = nullptr;
 bool wakeMicActive = false;
@@ -68,6 +73,22 @@ void setState(ScreenState state) {
     screenState = state;
     dirty = true;
   }
+}
+
+int speakerVolume() {
+  return (volumePercent * 255 + 50) / 100;
+}
+
+void setVolumePercent(int value) {
+  const int next = constrain(value, 0, 100);
+  if (next == volumePercent) return;
+  volumePercent = next;
+  Preferences preferences;
+  if (preferences.begin("sashmo", false)) {
+    preferences.putUChar("volume", static_cast<uint8_t>(volumePercent));
+    preferences.end();
+  }
+  dirty = true;
 }
 
 String durationLabel(int minutes) {
@@ -172,6 +193,35 @@ void drawIdle() {
   M5.Display.setCursor(116, 229);
   M5.Display.print(kWakeWordEnabled && (usbPowered || kWakeOnBattery)
                      ? "SAY HELLO SASHMO" : "TAP TO SPEAK");
+  M5.Display.fillRoundRect(220, 174, 88, 42, 8, 0x18E3);
+  M5.Display.setTextColor(0xFFFF, 0x18E3);
+  M5.Display.setCursor(228, 190);
+  M5.Display.printf("VOL %d%%", volumePercent);
+}
+
+void drawVolume() {
+  drawFrame();
+  M5.Display.setTextColor(0xFFFF, 0x18E3);
+  M5.Display.setTextSize(2);
+  M5.Display.setCursor(20, 48);
+  M5.Display.print("Volume");
+  M5.Display.setTextColor(0x7FEF, 0x18E3);
+  M5.Display.setTextSize(4);
+  M5.Display.setCursor(102, 84);
+  M5.Display.printf("%d%%", volumePercent);
+  M5.Display.fillRoundRect(227, 40, 75, 36, 8, 0x25F6);
+  M5.Display.setTextColor(0xFFFF, 0x25F6);
+  M5.Display.setTextSize(1);
+  M5.Display.setCursor(247, 54);
+  M5.Display.print("BACK");
+  M5.Display.fillRoundRect(20, 158, 128, 62, 10, 0x25F6);
+  M5.Display.fillRoundRect(172, 158, 128, 62, 10, 0x25F6);
+  M5.Display.setTextColor(0xFFFF, 0x25F6);
+  M5.Display.setTextSize(3);
+  M5.Display.setCursor(74, 175);
+  M5.Display.print("-");
+  M5.Display.setCursor(224, 175);
+  M5.Display.print("+");
 }
 
 void drawDetails() {
@@ -248,6 +298,7 @@ void render() {
     case ScreenState::Idle: drawIdle(); break;
     case ScreenState::Details: drawDetails(); break;
     case ScreenState::Notifications: drawNotifications(); break;
+    case ScreenState::Volume: drawVolume(); break;
     case ScreenState::Listening: drawActivity("Listening", "Speak now", 0x7FEF); break;
     case ScreenState::Processing: drawActivity("Processing", "One moment", 0xFFE0); break;
     case ScreenState::Speaking: drawActivity("Speaking", "Playing reply", 0x7FEF); break;
@@ -465,64 +516,80 @@ bool pushToTalkOnce(bool followUp) {
     return false;
   }
 
-  const size_t wavBytes = kWavHeaderBytes + kRecordSamples * sizeof(int16_t);
-  uint8_t* wav = static_cast<uint8_t*>(heap_caps_malloc(wavBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-  if (!wav) wav = static_cast<uint8_t*>(malloc(wavBytes));
+  const size_t capacity = kWavHeaderBytes + kRecordSamples * sizeof(int16_t);
+  uint8_t* wav = static_cast<uint8_t*>(heap_caps_malloc(capacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!wav) wav = static_cast<uint8_t*>(malloc(capacity));
   if (!wav) { failVoice("No audio memory"); return false; }
 
   M5.Speaker.end();
   setState(ScreenState::Listening);
   render();
   const bool micStarted = M5.Mic.begin();
-  const bool queued = micStarted && M5.Mic.record(reinterpret_cast<int16_t*>(wav + kWavHeaderBytes), kRecordSamples, kSampleRate);
-  if (!queued) {
+  if (!micStarted) {
     M5.Mic.end();
     free(wav);
     failVoice("Microphone failed");
     return false;
   }
-  const uint32_t deadline = millis() + 8000;
-  while (M5.Mic.isRecording() && static_cast<int32_t>(deadline - millis()) > 0) {
-    M5.update();
-    delay(10);
+  int16_t* samples = reinterpret_cast<int16_t*>(wav + kWavHeaderBytes);
+  size_t recordedSamples = 0;
+  int activeChunks = 0;
+  int silentChunks = 0;
+  bool captureFailed = false;
+  while (recordedSamples + kRecordChunkSamples <= kRecordSamples) {
+    if (!M5.Mic.record(samples + recordedSamples, kRecordChunkSamples, kSampleRate)) {
+      captureFailed = true;
+      break;
+    }
+    const uint32_t deadline = millis() + 2000;
+    while (M5.Mic.isRecording() && static_cast<int32_t>(deadline - millis()) > 0) {
+      M5.update();
+      delay(10);
+    }
+    if (M5.Mic.isRecording()) {
+      captureFailed = true;
+      break;
+    }
+    uint32_t magnitude = 0;
+    int peak = 0;
+    for (size_t i = recordedSamples; i < recordedSamples + kRecordChunkSamples; ++i) {
+      const int value = abs(static_cast<int>(samples[i]));
+      magnitude += value;
+      peak = max(peak, value);
+    }
+    recordedSamples += kRecordChunkSamples;
+    if (peak >= 200 && magnitude / kRecordChunkSamples >= 30) {
+      ++activeChunks;
+      silentChunks = 0;
+    } else if (activeChunks > 0) {
+      ++silentChunks;
+    }
+    if (activeChunks > 0 && silentChunks >= kEndSilenceChunks) break;
+    if (activeChunks == 0 && recordedSamples >= kStartTimeoutSamples) break;
   }
-  const bool complete = M5.Mic.isRecording() == 0;
   M5.Mic.end();
-  if (!complete) {
+  if (captureFailed) {
     free(wav);
     failVoice("Mic timeout");
     return false;
   }
-
-  int peak = 0;
-  const int16_t* samples = reinterpret_cast<int16_t*>(wav + kWavHeaderBytes);
-  for (size_t i = 0; i < kRecordSamples; ++i) peak = max(peak, abs(static_cast<int>(samples[i])));
-  Serial.printf("MIC captured samples=%u peak=%d\n", static_cast<unsigned>(kRecordSamples), peak);
-  if (followUp) {
-    int activeBlocks = 0;
-    for (size_t offset = 0; offset < kRecordSamples; offset += 1600) {
-      uint32_t magnitude = 0;
-      int blockPeak = 0;
-      for (size_t i = offset; i < offset + 1600; ++i) {
-        const int sample = abs(static_cast<int>(samples[i]));
-        magnitude += sample;
-        blockPeak = max(blockPeak, sample);
-      }
-      if (blockPeak >= 200 && magnitude / 1600 >= 30) ++activeBlocks;
-    }
-    if (activeBlocks < 2) {
-      free(wav);
-      setState(ScreenState::Idle);
-      return false;
-    }
+  Serial.printf("MIC captured samples=%u active_chunks=%d\n",
+                static_cast<unsigned>(recordedSamples), activeChunks);
+  if (followUp && activeChunks < 2) {
+    free(wav);
+    setState(ScreenState::Idle);
+    return false;
   }
-  makeWavHeader(wav, kRecordSamples);
+  makeWavHeader(wav, recordedSamples);
+  const size_t wavBytes = kWavHeaderBytes + recordedSamples * sizeof(int16_t);
   setState(ScreenState::Processing);
   render();
 
   HTTPClient http;
   http.begin(baseUrl() + "/v1/voice");
-  http.setTimeout(30000);
+  http.setTimeout(60000);
+  const char* responseHeaders[] = {"X-Sashmo-Volume-Percent"};
+  http.collectHeaders(responseHeaders, 1);
   http.addHeader("X-Sashmo-Token", kDeviceToken);
   http.addHeader("Content-Type", "audio/wav");
   if (followUp) http.addHeader("X-Sashmo-Follow-Up", "1");
@@ -540,6 +607,12 @@ bool pushToTalkOnce(bool followUp) {
     return false;
   }
 
+  const String requestedVolume = http.header("X-Sashmo-Volume-Percent");
+  if (!requestedVolume.isEmpty()) {
+    const int requested = requestedVolume.toInt();
+    if (requested >= 0 && requested <= 100) setVolumePercent(requested);
+  }
+
   const int replySize = http.getSize();
   if (replySize < 44 || replySize > static_cast<int>(kMaxReplyBytes)) {
     http.end();
@@ -551,7 +624,7 @@ bool pushToTalkOnce(bool followUp) {
   if (!reply) { http.end(); failVoice("No reply memory"); return false; }
   WiFiClient* stream = http.getStreamPtr();
   size_t received = 0;
-  const uint32_t readDeadline = millis() + 30000;
+  const uint32_t readDeadline = millis() + 60000;
   while (received < static_cast<size_t>(replySize) && static_cast<int32_t>(readDeadline - millis()) > 0) {
     const int available = stream->available();
     if (available > 0) {
@@ -571,7 +644,7 @@ bool pushToTalkOnce(bool followUp) {
 
   setState(ScreenState::Speaking);
   render();
-  M5.Speaker.setVolume(160);
+  M5.Speaker.setVolume(speakerVolume());
   if (!M5.Speaker.begin() || !M5.Speaker.playWav(reply, replySize, 1, 0, true)) {
     free(reply);
     failVoice("Speaker failed");
@@ -678,7 +751,7 @@ void pollWakeWord(uint32_t now) {
     Serial.println("WAKE phrase detected");
     stopWakeListening();
     wakeDisplay(millis());
-    M5.Speaker.setVolume(120);
+    M5.Speaker.setVolume(speakerVolume() * 3 / 4);
     if (M5.Speaker.begin()) {
       M5.Speaker.tone(880, 120);
       delay(150);
@@ -697,6 +770,11 @@ void setup() {
   if (M5.Display.width() < M5.Display.height()) M5.Display.setRotation(M5.Display.getRotation() ^ 1);
   M5.Speaker.end();
   M5.Mic.end();
+  Preferences preferences;
+  if (preferences.begin("sashmo", true)) {
+    volumePercent = min(100, static_cast<int>(preferences.getUChar("volume", 63)));
+    preferences.end();
+  }
   readPower();
   lastInteractionMs = millis();
   applyPowerProfile();
@@ -751,6 +829,8 @@ void loop() {
         render();
         if (screenState == ScreenState::Idle && touch.y >= 160
             && touch.x >= 115 && touch.x <= 205) pushToTalk();
+        else if (screenState == ScreenState::Idle && touch.y >= 165
+                 && touch.x >= 215) setState(ScreenState::Volume);
         return;
       }
       lastInteractionMs = now;
@@ -758,10 +838,16 @@ void loop() {
       Serial.printf("TOUCH x=%d y=%d\n", touch.x, touch.y);
       if (screenState == ScreenState::Details || screenState == ScreenState::Notifications) {
         setState(ScreenState::Idle);
+      } else if (screenState == ScreenState::Volume) {
+        if (touch.y >= 158 && touch.x <= 150) setVolumePercent(volumePercent - 10);
+        else if (touch.y >= 158 && touch.x >= 170) setVolumePercent(volumePercent + 10);
+        else if (touch.y >= 34 && touch.y <= 85 && touch.x >= 220) setState(ScreenState::Idle);
       } else if (screenState == ScreenState::Idle && touch.y >= 205 && touch.x <= 100) {
         setState(ScreenState::Notifications);
       } else if (screenState == ScreenState::Idle && touch.y >= 160 && touch.x >= 115 && touch.x <= 205) {
         pushToTalk();
+      } else if (screenState == ScreenState::Idle && touch.y >= 165 && touch.x >= 215) {
+        setState(ScreenState::Volume);
       } else if (screenState == ScreenState::Idle && touch.y >= 34 && touch.y <= 147) {
         setState(ScreenState::Details);
       }
