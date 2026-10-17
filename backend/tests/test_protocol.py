@@ -34,9 +34,9 @@ def test_silent_follow_up_returns_no_audio(monkeypatch):
 
     async def silent_audio(*args, **kwargs):
         options.append(kwargs.get("silent_on_no_speech"))
-        return "", "", b""
+        return "", ""
 
-    monkeypatch.setattr(api_module, "process_audio", silent_audio)
+    monkeypatch.setattr(api_module, "process_audio_text", silent_audio)
     payload = io.BytesIO()
     with wave.open(payload, "wb") as writer:
         writer.setnchannels(1)
@@ -54,6 +54,7 @@ def test_silent_follow_up_returns_no_audio(monkeypatch):
 
 
 def test_voice_volume_command_returns_device_setting_header(monkeypatch, tmp_path):
+    import sashmo.api as api_module
     import sashmo.speech as speech_module
     from sashmo.conversation import ConversationProvider
 
@@ -64,7 +65,7 @@ def test_voice_volume_command_returns_device_setting_header(monkeypatch, tmp_pat
         return b"audio"
 
     monkeypatch.setattr(speech_module, "transcribe", spoken_volume)
-    monkeypatch.setattr(speech_module, "synthesize_reply", spoken_reply)
+    monkeypatch.setattr(api_module, "synthesize_reply", spoken_reply)
     provider = ConversationProvider(tmp_path / "projects.local.json")
     payload = io.BytesIO()
     with wave.open(payload, "wb") as writer:
@@ -79,6 +80,39 @@ def test_voice_volume_command_returns_device_setting_header(monkeypatch, tmp_pat
                                content=payload.getvalue())
     assert response.status_code == 200
     assert response.headers["X-Sashmo-Volume-Percent"] == "30"
+
+
+def test_long_voice_reply_is_segmented_and_can_be_stopped(monkeypatch):
+    import sashmo.api as api_module
+
+    async def long_answer(*_args, **_kwargs):
+        return "detailed request", "A long spoken answer. " * 32
+
+    async def fake_cedar(text):
+        return text.encode()
+
+    monkeypatch.setattr(api_module, "process_audio_text", long_answer)
+    monkeypatch.setattr(api_module, "synthesize_reply", fake_cedar)
+    payload = io.BytesIO()
+    with wave.open(payload, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(16000)
+        writer.writeframes(b"\0\0" * 16000)
+    headers = {"X-Sashmo-Token": "x" * 32}
+    app = create_app(Config("192.168.1.10", 8765, "x" * 32), start_worker=False)
+    with TestClient(app) as client:
+        first = client.post("/v1/voice", headers=headers, content=payload.getvalue())
+        assert first.status_code == 200
+        assert first.headers["X-Sashmo-More"] == "1"
+        assert int(first.headers["X-Sashmo-Parts"]) > 1
+        reply_id = first.headers["X-Sashmo-Reply-Id"]
+        assert client.get(f"/v1/voice/reply/{reply_id}").status_code == 401
+        second = client.get(f"/v1/voice/reply/{reply_id}", headers=headers)
+        assert second.status_code == 200
+        assert second.headers["X-Sashmo-Part"] == "2"
+        assert client.delete(f"/v1/voice/reply/{reply_id}", headers=headers).status_code == 204
+        assert client.get(f"/v1/voice/reply/{reply_id}", headers=headers).status_code == 404
 
 
 def test_wake_audio_is_authenticated_bounded_and_local(monkeypatch):

@@ -20,6 +20,7 @@ constexpr size_t kWavHeaderBytes = 44;
 constexpr size_t kMaxReplyBytes = 1000000;
 
 enum class ScreenState { Idle, Listening, Processing, Speaking, Details, Notifications, Volume, Disconnected, Error };
+enum class ReplyPlayback { Completed, Stopped, Failed };
 
 struct QuotaWindow {
   bool present = false;
@@ -58,6 +59,8 @@ uint32_t lastInteractionMs = 0;
 uint8_t appliedBrightness = 0;
 bool displaySleeping = false;
 int volumePercent = 63;
+int replyPart = 1;
+int replyParts = 1;
 String conversationMemory;
 int16_t* wakeSamples = nullptr;
 int16_t* wakeTail = nullptr;
@@ -290,6 +293,19 @@ void drawActivity(const char* title, const char* subtitle, uint16_t color) {
   M5.Display.setTextSize(2);
   M5.Display.setCursor(20, 165);
   M5.Display.print(subtitle);
+  if (screenState == ScreenState::Speaking) {
+    M5.Display.fillRoundRect(228, 5, 84, 43, 9, 0xC124);
+    M5.Display.setTextColor(0xFFFF, 0xC124);
+    M5.Display.setTextSize(2);
+    M5.Display.setCursor(239, 18);
+    M5.Display.print("STOP");
+    if (replyParts > 1) {
+      M5.Display.setTextColor(0xBDF7, 0x0841);
+      M5.Display.setTextSize(1);
+      M5.Display.setCursor(20, 199);
+      M5.Display.printf("Part %d of %d", replyPart, replyParts);
+    }
+  }
 }
 
 void render() {
@@ -510,6 +526,77 @@ void stopWakeListening() {
   wakeRecording = false;
 }
 
+ReplyPlayback playHttpReply(HTTPClient& http) {
+  const int replySize = http.getSize();
+  if (replySize < 44 || replySize > static_cast<int>(kMaxReplyBytes)) {
+    http.end();
+    failVoice("Reply too large");
+    return ReplyPlayback::Failed;
+  }
+  uint8_t* reply = static_cast<uint8_t*>(heap_caps_malloc(replySize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!reply) reply = static_cast<uint8_t*>(malloc(replySize));
+  if (!reply) {
+    http.end();
+    failVoice("No reply memory");
+    return ReplyPlayback::Failed;
+  }
+  WiFiClient* stream = http.getStreamPtr();
+  size_t received = 0;
+  const uint32_t readDeadline = millis() + 60000;
+  while (received < static_cast<size_t>(replySize) && static_cast<int32_t>(readDeadline - millis()) > 0) {
+    const int available = stream->available();
+    if (available > 0) {
+      const size_t wanted = min(static_cast<size_t>(available), static_cast<size_t>(replySize) - received);
+      received += stream->readBytes(reply + received, wanted);
+    } else {
+      delay(10);
+    }
+  }
+  http.end();
+  if (received != static_cast<size_t>(replySize)) {
+    free(reply);
+    failVoice("Reply timeout");
+    return ReplyPlayback::Failed;
+  }
+
+  dirty = true;
+  setState(ScreenState::Speaking);
+  render();
+  M5.Speaker.setVolume(speakerVolume());
+  if (!M5.Speaker.begin() || !M5.Speaker.playWav(reply, replySize, 1, 0, true)) {
+    free(reply);
+    failVoice("Speaker failed");
+    return ReplyPlayback::Failed;
+  }
+  Serial.printf("SPEAKER playing part=%d/%d bytes=%d\n", replyPart, replyParts, replySize);
+  bool stopped = false;
+  while (M5.Speaker.isPlaying()) {
+    M5.update();
+    if (M5.Touch.getCount()) {
+      const auto touch = M5.Touch.getDetail(0);
+      if (touch.wasClicked() && touch.x >= 228 && touch.y <= 55) {
+        stopped = true;
+        M5.Speaker.stop();
+        break;
+      }
+    }
+    delay(10);
+  }
+  M5.Speaker.end();
+  free(reply);
+  return stopped ? ReplyPlayback::Stopped : ReplyPlayback::Completed;
+}
+
+void cancelReply(const String& replyId) {
+  if (replyId.isEmpty() || WiFi.status() != WL_CONNECTED) return;
+  HTTPClient cancel;
+  cancel.begin(baseUrl() + "/v1/voice/reply/" + replyId);
+  cancel.setTimeout(3000);
+  cancel.addHeader("X-Sashmo-Token", kDeviceToken);
+  cancel.sendRequest("DELETE");
+  cancel.end();
+}
+
 bool pushToTalkOnce(bool followUp) {
   stopWakeListening();
   if (WiFi.status() != WL_CONNECTED || !serverConnected) {
@@ -590,8 +677,9 @@ bool pushToTalkOnce(bool followUp) {
   http.begin(baseUrl() + "/v1/voice");
   http.setTimeout(60000);
   const char* responseHeaders[] = {"X-Sashmo-Volume-Percent", "X-Sashmo-Memory",
-                                   "X-Sashmo-Error"};
-  http.collectHeaders(responseHeaders, 3);
+                                   "X-Sashmo-Error", "X-Sashmo-Reply-Id", "X-Sashmo-More",
+                                   "X-Sashmo-Part", "X-Sashmo-Parts"};
+  http.collectHeaders(responseHeaders, 7);
   http.addHeader("X-Sashmo-Token", kDeviceToken);
   http.addHeader("Content-Type", "audio/wav");
   if (!conversationMemory.isEmpty()) http.addHeader("X-Sashmo-Memory", conversationMemory);
@@ -625,51 +713,47 @@ bool pushToTalkOnce(bool followUp) {
       preferences.end();
     }
   }
-
-  const int replySize = http.getSize();
-  if (replySize < 44 || replySize > static_cast<int>(kMaxReplyBytes)) {
-    http.end();
-    failVoice("Reply too large");
+  String replyId = http.header("X-Sashmo-Reply-Id");
+  String more = http.header("X-Sashmo-More");
+  replyPart = max(1, static_cast<int>(http.header("X-Sashmo-Part").toInt()));
+  replyParts = max(1, static_cast<int>(http.header("X-Sashmo-Parts").toInt()));
+  ReplyPlayback playback = playHttpReply(http);
+  if (playback != ReplyPlayback::Completed) {
+    cancelReply(replyId);
+    setState(ScreenState::Idle);
     return false;
   }
-  uint8_t* reply = static_cast<uint8_t*>(heap_caps_malloc(replySize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-  if (!reply) reply = static_cast<uint8_t*>(malloc(replySize));
-  if (!reply) { http.end(); failVoice("No reply memory"); return false; }
-  WiFiClient* stream = http.getStreamPtr();
-  size_t received = 0;
-  const uint32_t readDeadline = millis() + 60000;
-  while (received < static_cast<size_t>(replySize) && static_cast<int32_t>(readDeadline - millis()) > 0) {
-    const int available = stream->available();
-    if (available > 0) {
-      const size_t wanted = min(static_cast<size_t>(available), static_cast<size_t>(replySize) - received);
-      const size_t count = stream->readBytes(reply + received, wanted);
-      received += count;
-    } else {
-      delay(10);
+  while (more == "1") {
+    if (replyId.isEmpty() || replyId.length() > 64) {
+      failVoice("Reply lost");
+      return false;
+    }
+    HTTPClient next;
+    next.begin(baseUrl() + "/v1/voice/reply/" + replyId);
+    next.setTimeout(60000);
+    const char* nextHeaders[] = {"X-Sashmo-More", "X-Sashmo-Part", "X-Sashmo-Parts", "X-Sashmo-Error"};
+    next.collectHeaders(nextHeaders, 4);
+    next.addHeader("X-Sashmo-Token", kDeviceToken);
+    const int nextStatus = next.GET();
+    if (nextStatus != 200) {
+      const String nextError = next.header("X-Sashmo-Error");
+      next.end();
+      cancelReply(replyId);
+      failVoice(nextError.isEmpty() ? "Reply unavailable" : nextError.c_str());
+      return false;
+    }
+    more = next.header("X-Sashmo-More");
+    replyPart = max(1, static_cast<int>(next.header("X-Sashmo-Part").toInt()));
+    replyParts = max(1, static_cast<int>(next.header("X-Sashmo-Parts").toInt()));
+    playback = playHttpReply(next);
+    if (playback != ReplyPlayback::Completed) {
+      cancelReply(replyId);
+      setState(ScreenState::Idle);
+      return false;
     }
   }
-  http.end();
-  if (received != static_cast<size_t>(replySize)) {
-    free(reply);
-    failVoice("Reply timeout");
-    return false;
-  }
-
-  setState(ScreenState::Speaking);
-  render();
-  M5.Speaker.setVolume(speakerVolume());
-  if (!M5.Speaker.begin() || !M5.Speaker.playWav(reply, replySize, 1, 0, true)) {
-    free(reply);
-    failVoice("Speaker failed");
-    return false;
-  }
-  Serial.printf("SPEAKER playing bytes=%d\n", replySize);
-  while (M5.Speaker.isPlaying()) {
-    M5.update();
-    delay(10);
-  }
-  M5.Speaker.end();
-  free(reply);
+  replyPart = 1;
+  replyParts = 1;
   setState(ScreenState::Idle);
   nextPulseMs = millis();
   return true;

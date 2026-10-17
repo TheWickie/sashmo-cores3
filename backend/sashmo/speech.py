@@ -200,15 +200,50 @@ async def synthesize_reply(text: str) -> bytes:
 async def process_audio(data: bytes, quota: dict[str, Any] | None, connected: bool,
                         provider: TextResponseProvider | None = None,
                         silent_on_no_speech: bool = False) -> tuple[str, str, bytes]:
+    transcript, answer = await process_audio_text(data, quota, connected, provider,
+                                                  silent_on_no_speech)
+    if silent_on_no_speech and not transcript:
+        return "", "", b""
+    return transcript, answer, await synthesize_reply(answer)
+
+
+async def process_audio_text(data: bytes, quota: dict[str, Any] | None, connected: bool,
+                             provider: TextResponseProvider | None = None,
+                             silent_on_no_speech: bool = False) -> tuple[str, str]:
     transcript, confidence = await transcribe(data)
     if not transcript or confidence < 0.45:
         if silent_on_no_speech:
-            return "", "", b""
+            return "", ""
         answer = "Sorry, I didn't catch that. Please tap the microphone and try again."
     else:
         answer = await (provider or ReadOnlyCommandProvider()).respond(transcript, quota, connected)
-    audio = await synthesize_reply(answer)
-    return transcript or "", answer, audio
+    return transcript or "", answer
+
+
+def split_spoken_text(text: str, max_chars: int = 180) -> list[str]:
+    """Split long speech at sentences and word boundaries without dropping text."""
+    if not 100 <= max_chars <= 300:
+        raise ValueError("Invalid speech segment length")
+    words = text.split()
+    if not words:
+        return []
+    parts: list[str] = []
+    current = ""
+    for word in words:
+        if len(word) > max_chars:
+            word = word[:max_chars]  # Bounded input; pathological single tokens are not speech.
+        proposed = f"{current} {word}" if current else word
+        if len(proposed) > max_chars and current:
+            parts.append(current)
+            current = word
+        else:
+            current = proposed
+        if current.endswith((".", "?", "!")) and len(current) >= max_chars // 2:
+            parts.append(current)
+            current = ""
+    if current:
+        parts.append(current)
+    return parts
 
 
 def _windows(quota: dict[str, Any] | None) -> list[dict[str, Any]]:

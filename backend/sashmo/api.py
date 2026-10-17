@@ -21,8 +21,9 @@ from .conversation import ConversationProvider
 from .codex_tasks import CodexTaskManager
 from .gmail import GmailWorker
 from .projects import ProjectRegistry
-from .speech import process_audio, recognize_wake, validate_wav
+from .speech import process_audio_text, recognize_wake, split_spoken_text, synthesize_reply, validate_wav
 from .state import QuotaWorker, StateStore
+from .voice_stream import VoiceStreamManager
 
 
 LOG = logging.getLogger("sashmo")
@@ -60,6 +61,7 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
     voice_provider = conversation or (ConversationProvider(Path(__file__).resolve().parents[2] /
                                                           "projects.local.json", state=store,
                                                           task_manager=task_manager) if start_worker else None)
+    voice_stream = VoiceStreamManager(synthesize_reply)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -82,10 +84,12 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
             if calendar_worker:
                 await calendar_worker.stop()
             await task_manager.close()
+            await voice_stream.cancel()
 
     app = FastAPI(title="Sashmo", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.store = store
     app.state.task_manager = task_manager
+    app.state.voice_stream = voice_stream
 
     def authenticate(value: str | None) -> None:
         if not value or not secrets.compare_digest(value, config.device_token):
@@ -167,9 +171,13 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
         if voice_provider is not None and hasattr(voice_provider, "restore_device_memory"):
             voice_provider.restore_device_memory(request.headers.get("X-Sashmo-Memory"))
         try:
-            transcript, answer, output = await process_audio(audio, store.quota, store.codex_connected,
-                                                             provider=voice_provider,
-                                                             silent_on_no_speech=follow_up)
+            transcript, answer = await process_audio_text(audio, store.quota, store.codex_connected,
+                                                          provider=voice_provider,
+                                                          silent_on_no_speech=follow_up)
+            if follow_up and not transcript:
+                return Response(status_code=204, headers={"Cache-Control": "no-store"})
+            parts = split_spoken_text(answer)
+            output, reply_id, more = await voice_stream.start(parts)
             store.voice_provider = voice_provider.last_source if voice_provider else "local"
         except Exception as exc:
             if isinstance(exc, RuntimeError) and str(exc).startswith("Cedar speech"):
@@ -182,10 +190,13 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
             store.voice_state = "idle"
             store.last_voice_local = datetime.now().astimezone().isoformat(timespec="seconds")
         LOG.info("Voice request completed (recognized=%s, response_bytes=%d)", bool(transcript), len(output))
-        if follow_up and not transcript:
-            return Response(status_code=204, headers={"Cache-Control": "no-store"})
         headers = {"X-Sashmo-Recognized": "1" if transcript else "0",
                    "Cache-Control": "no-store"}
+        if reply_id:
+            headers["X-Sashmo-Reply-Id"] = reply_id
+            headers["X-Sashmo-More"] = "1" if more else "0"
+            headers["X-Sashmo-Part"] = "1"
+            headers["X-Sashmo-Parts"] = str(len(parts))
         volume = getattr(voice_provider, "volume_percent", None)
         if volume is not None:
             headers["X-Sashmo-Volume-Percent"] = str(volume)
@@ -198,6 +209,31 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
             media_type="audio/wav",
             headers=headers,
         )
+
+    @app.get("/v1/voice/reply/{reply_id}")
+    async def next_voice_reply(reply_id: str,
+                               x_sashmo_token: str | None = Header(default=None)) -> Response:
+        authenticate(x_sashmo_token)
+        try:
+            output, more, index, count = await voice_stream.next(reply_id)
+        except LookupError:
+            raise HTTPException(status_code=404, detail="Reply expired") from None
+        except TimeoutError:
+            raise HTTPException(status_code=504, detail="Reply segment timed out",
+                                headers={"X-Sashmo-Error": "Reply timeout"}) from None
+        except RuntimeError:
+            raise HTTPException(status_code=503, detail="Cedar speech unavailable",
+                                headers={"X-Sashmo-Error": "Cedar unavailable"}) from None
+        return Response(output, media_type="audio/wav", headers={
+            "X-Sashmo-More": "1" if more else "0", "X-Sashmo-Part": str(index),
+            "X-Sashmo-Parts": str(count), "Cache-Control": "no-store"})
+
+    @app.delete("/v1/voice/reply/{reply_id}")
+    async def stop_voice_reply(reply_id: str,
+                               x_sashmo_token: str | None = Header(default=None)) -> Response:
+        authenticate(x_sashmo_token)
+        await voice_stream.cancel(reply_id)
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
     @app.post("/v1/wake")
     async def wake(request: Request, x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:

@@ -46,6 +46,22 @@ def test_plan_conversation_keeps_bounded_context_without_actions(tmp_path):
     assert "no tools" in messages[0]["content"].lower()
 
 
+def test_explicit_detailed_answer_is_saved_without_short_reply_cap(tmp_path):
+    class LongClient(FakePlanClient):
+        def stream_text(self, key, model, messages):
+            self.requests.append((key, model, messages))
+            return "This is a detailed paragraph about the design. " * 35
+
+    client = LongClient()
+    provider = ConversationProvider(tmp_path / "projects.local.json", client=client)
+    answer = asyncio.run(provider.respond("Give me a detailed explanation of the design", None, True))
+    assert len(answer) > 1000
+    assert provider.long_reply is True
+    assert "1,000 words" in client.requests[-1][2][0]["content"]
+    restarted = ConversationProvider(tmp_path / "projects.local.json", client=client)
+    assert restarted.turns[-1]["content"] == answer
+
+
 def test_time_word_in_general_question_does_not_hijack_plan_conversation(tmp_path):
     client = FakePlanClient()
     provider = ConversationProvider(tmp_path / "projects.local.json", client=client)
