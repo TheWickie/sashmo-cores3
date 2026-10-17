@@ -7,6 +7,7 @@ import base64
 from collections import deque
 from datetime import datetime, timedelta
 import json
+import logging
 from pathlib import Path
 import re
 import time
@@ -19,6 +20,8 @@ from .codex_rpc import CodexAppServer
 from .codex_sessions import recent_work, work_excerpt, _safe_text
 from .siwc import SIWCClient, SIWCError, WindowsTokenStore
 from .speech import answer_command
+
+LOG = logging.getLogger("sashmo")
 
 
 _GUIDANCE = ("You are Sashmo, a concise spoken assistant. Answer in at most 45 words. "
@@ -203,7 +206,8 @@ class ConversationProvider:
             if self.state is not None:
                 self.state.update_codex_work(result, None)
             return result
-        except Exception:
+        except Exception as exc:
+            LOG.warning("Recent Codex task list unavailable (%s)", type(exc).__name__)
             return getattr(self.state, "codex_work", []) or []
         finally:
             await rpc.close()
@@ -269,7 +273,8 @@ class ConversationProvider:
         try:
             await rpc.start()
             excerpt = await asyncio.wait_for(work_excerpt(rpc, selected["thread_id"]), timeout=25)
-        except Exception:
+        except Exception as exc:
+            LOG.warning("Codex task history unavailable (%s)", type(exc).__name__)
             return f"I found {selected['title']}, but can't read its recent conversation right now."
         finally:
             await rpc.close()

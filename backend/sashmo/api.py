@@ -40,6 +40,7 @@ class Config:
     wake_word_enabled: bool = False
     openai_billing_api_key_id: str = ""
     api_monthly_budget_usd: Decimal | None = None
+    screen_standby_after_seconds: int = 900
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -64,8 +65,11 @@ class Config:
             raise ValueError("Invalid API monthly budget") from exc
         if budget is not None and (not budget.is_finite() or budget <= 0 or budget > 1000000):
             raise ValueError("Invalid API monthly budget")
+        standby = int(data.get("screen_standby_after_seconds", 900))
+        if not 60 <= standby <= 3600:
+            raise ValueError("Display standby delay must be 60 through 3600 seconds")
         return cls(str(host), port, token, poll, data.get("wake_word_enabled") is True,
-                   key_id, budget)
+                   key_id, budget, standby)
 
 
 def create_app(config: Config, *, start_worker: bool = True, state: StateStore | None = None,
@@ -137,7 +141,8 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
         authenticate(x_sashmo_token)
         store.record_device(battery, charging, usb, wifi_rssi, screen_sleeping)
         return JSONResponse({**store.pulse(since), "wake_word_enabled": config.wake_word_enabled,
-                             "api_billing": store.billing_pulse()},
+                             "api_billing": store.billing_pulse(),
+                             "screen_standby_after_seconds": config.screen_standby_after_seconds},
                             headers={"Cache-Control": "no-store"})
 
     @app.get("/v1/status")

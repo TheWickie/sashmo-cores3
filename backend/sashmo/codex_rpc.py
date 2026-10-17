@@ -34,6 +34,9 @@ class CodexAppServer:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            # A single thread history reply can exceed asyncio's 64 KiB
+            # default line limit, even when requesting one summary turn.
+            limit=8 * 1024 * 1024,
         )
         self._reader_task = asyncio.create_task(self._read_loop())
         await self.request("initialize", {

@@ -61,6 +61,7 @@ bool wifiWasConnected = false;
 uint32_t lastInteractionMs = 0;
 uint8_t appliedBrightness = 0;
 bool displaySleeping = false;
+uint32_t screenStandbyAfterSeconds = kScreenStandbyAfterSeconds;
 int volumePercent = 63;
 int replyPart = 1;
 int replyParts = 1;
@@ -396,7 +397,7 @@ void updateDisplayStandby(uint32_t now) {
                         || screenState == ScreenState::Processing
                         || screenState == ScreenState::Speaking;
   if (!displaySleeping && !activeVoice
-      && now - lastInteractionMs >= kScreenStandbyAfterSeconds * 1000UL) {
+      && now - lastInteractionMs >= screenStandbyAfterSeconds * 1000UL) {
     M5.Display.sleep();
     displaySleeping = true;
     dirty = true;
@@ -433,6 +434,10 @@ void parsePulse(const String& payload) {
       dirty = true;
       if (!enabled) stopWakeListening();
     }
+  }
+  if (doc["screen_standby_after_seconds"].is<uint32_t>()) {
+    const uint32_t seconds = doc["screen_standby_after_seconds"].as<uint32_t>();
+    if (seconds >= 60 && seconds <= 3600) screenStandbyAfterSeconds = seconds;
   }
   if (doc["api_billing"].is<JsonObject>()) {
     const String spent = String(doc["api_billing"]["spent_usd"] | "");

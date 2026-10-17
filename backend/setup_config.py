@@ -32,7 +32,7 @@ def main() -> None:
         "battery_idle_brightness": 75,
         "low_battery_brightness": 45,
         "battery_dim_after_seconds": 45,
-        "screen_standby_after_seconds": 300,
+        "screen_standby_after_seconds": 900,
         "wake_word_enabled": False,
         "wake_on_battery": False,
         "low_battery_percent": 15,

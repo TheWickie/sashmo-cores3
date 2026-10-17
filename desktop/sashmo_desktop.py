@@ -368,6 +368,14 @@ class SashmoDesktop(tk.Tk):
         tk.Entry(row, textvariable=self.poll_var, width=8, bg=PANEL_LIGHT, fg=TEXT,
                  insertbackground=TEXT, relief="flat", font=("Segoe UI", 11), justify="center").pack(side="right")
         self._label(card, "Allowed range: 30–3600. Saving restarts the independent service.", 9, MUTED).pack(anchor="w", padx=24)
+        standby_row = tk.Frame(card, bg=PANEL)
+        standby_row.pack(fill="x", padx=24, pady=(16, 4))
+        self._label(standby_row, "CoreS3 screen standby after (minutes)", 11, TEXT).pack(side="left")
+        self.standby_var = tk.StringVar(value=str(int(config.get("screen_standby_after_seconds", 900)) // 60))
+        tk.Entry(standby_row, textvariable=self.standby_var, width=8, bg=PANEL_LIGHT, fg=TEXT,
+                 insertbackground=TEXT, relief="flat", font=("Segoe UI", 11), justify="center").pack(side="right")
+        self._label(card, "Allowed range: 1–60 minutes, on USB or battery. The screen stays awake while speaking.",
+                    9, MUTED).pack(anchor="w", padx=24)
         self.autostart_var = tk.BooleanVar(value=autostart_enabled())
         tk.Checkbutton(card, text="Keep the Sashmo backend running after Windows sign-in", variable=self.autostart_var,
                        bg=PANEL, fg=TEXT, selectcolor=PANEL_LIGHT, activebackground=PANEL,
@@ -407,15 +415,16 @@ class SashmoDesktop(tk.Tk):
                  insertbackground=TEXT, relief="flat", font=("Segoe UI", 10), justify="right").pack(side="right")
         self._button(billing, "Save settings", self._save_settings, True).pack(anchor="w", padx=24, pady=(0, 16))
 
-        standby_minutes = int(config.get("screen_standby_after_seconds", 300)) // 60
-        self._label(settings_body, f"CoreS3 display standby: {standby_minutes} minutes on USB or battery. First tap wakes it.",
-                    10, MUTED).pack(anchor="w", pady=(18, 4))
+        self.standby_status_label = self._label(settings_body,
+            f"CoreS3 display standby: {self.standby_var.get()} minutes on USB or battery. First tap wakes it.",
+            10, MUTED)
+        self.standby_status_label.pack(anchor="w", pady=(18, 4))
         wake_power = "USB and battery" if config.get("wake_on_battery", False) else "USB power only"
         wake_status = wake_power if config.get("wake_word_enabled", False) else "off"
         self.wake_status_label = self._label(settings_body, f"'Hello Sashmo' wake listening: {wake_status}. Recognition stays on this PC.",
                                              10, MUTED)
         self.wake_status_label.pack(anchor="w", pady=(0, 4))
-        self._label(settings_body, "Device standby and pulse settings are embedded in firmware; changing them requires a rebuild and flash.",
+        self._label(settings_body, "The screen standby setting updates on the next device check-in.",
                     10, MUTED).pack(anchor="w")
 
     def _build_projects(self) -> None:
@@ -1272,6 +1281,9 @@ class SashmoDesktop(tk.Tk):
             interval = int(self.poll_var.get())
             if not 30 <= interval <= 3600:
                 raise ValueError("Codex refresh must be between 30 and 3600 seconds")
+            standby_minutes = int(self.standby_var.get())
+            if not 1 <= standby_minutes <= 60:
+                raise ValueError("Display standby must be between 1 and 60 minutes")
             billing_key_id = self.billing_key_var.get().strip()
             if billing_key_id and (not billing_key_id.startswith("key_") or
                                    len(billing_key_id) > 100 or not billing_key_id.replace("_", "").isalnum()):
@@ -1285,10 +1297,12 @@ class SashmoDesktop(tk.Tk):
                 raise ValueError("Monthly budget must be between $0.01 and $1,000,000")
             wake_enabled = self.wake_word_var.get()
             update_config({"codex_poll_seconds": interval, "wake_word_enabled": wake_enabled,
+                           "screen_standby_after_seconds": standby_minutes * 60,
                            "openai_billing_api_key_id": billing_key_id,
                            "api_monthly_budget_usd": str(budget) if budget is not None else None})
             wake_power = "USB and battery" if load_config().get("wake_on_battery", False) else "USB power only"
             self.wake_status_label.configure(text=f"'Hello Sashmo' wake listening: {wake_power if wake_enabled else 'off'}. Recognition stays on this PC.")
+            self.standby_status_label.configure(text=f"CoreS3 display standby: {standby_minutes} minutes on USB or battery. First tap wakes it.")
             set_autostart(self.autostart_var.get())
             try:
                 managed = bool(send_service_command("status").get("managed"))

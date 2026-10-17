@@ -18,8 +18,10 @@ def test_authenticated_versioned_pulse():
         changed = client.get("/v1/pulse?since=-1", headers=headers).json()
         assert changed["quota"]["plan_reported"] == "example-plan"
         same = client.get(f"/v1/pulse?since={changed['version']}", headers=headers).json()
-        assert set(same) == {"version", "time", "date", "wake_word_enabled", "api_billing"}
+        assert set(same) == {"version", "time", "date", "wake_word_enabled", "api_billing",
+                             "screen_standby_after_seconds"}
         assert same["wake_word_enabled"] is False
+        assert same["screen_standby_after_seconds"] == 900
         assert same["api_billing"]["spent_usd"] is None
 
 
