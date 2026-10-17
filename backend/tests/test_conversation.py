@@ -122,7 +122,7 @@ def test_codex_activity_answer_uses_bounded_status_without_plan(tmp_path):
                           {"label": "Codex task 2", "state": "completed"}]
     client = FakePlanClient()
     provider = ConversationProvider(tmp_path / "projects.local.json", client=client, state=State())
-    reply = asyncio.run(provider.respond("What's Codex doing?", None, True))
+    reply = asyncio.run(provider.respond("How many active Codex tasks?", None, True))
     assert "1 is active" in reply
     assert "2 recent Codex tasks" in reply
     assert client.requests == []
@@ -134,10 +134,73 @@ def test_recent_codex_projects_answer_stays_local_and_sensitive(tmp_path):
         codex_projects = [{"name": "Sashmo"}, {"name": "Another"}]
     client = FakePlanClient()
     provider = ConversationProvider(tmp_path / "projects.local.json", client=client, state=State())
-    reply = asyncio.run(provider.respond("What are my recent projects?", None, True))
+    reply = asyncio.run(provider.respond("What are my recent project folders?", None, True))
     assert "Sashmo" in reply and "Another" in reply
     assert provider.sensitive_output is True
     assert client.requests == []
+
+
+def test_recent_codex_work_and_named_task_discussion(monkeypatch, tmp_path):
+    class FakeRpc:
+        async def start(self):
+            pass
+
+        async def close(self):
+            pass
+
+        async def request(self, method, params=None, timeout=30):
+            if method == "thread/list":
+                return {"data": [{"id": "task-1", "source": "vscode",
+                                  "preview": "Plan a small rover", "recencyAt": 100},
+                                 {"id": "task-2", "source": "cli",
+                                  "name": "Fix weather display", "recencyAt": 90}]}
+            assert method == "thread/turns/list" and params["threadId"] == "task-1"
+            return {"data": [{"items": [
+                {"type": "userMessage", "content": [{"type": "text", "text": "Can it be electric?"}]},
+                {"type": "commandExecution", "aggregatedOutput": "private output"},
+                {"type": "agentMessage", "phase": "final_answer", "text": "Yes, a small battery works."},
+            ]}]}
+
+    monkeypatch.setattr("sashmo.conversation.CodexAppServer", FakeRpc)
+    client = FakePlanClient()
+    provider = ConversationProvider(tmp_path / "projects.local.json", client=client)
+    listing = asyncio.run(provider.respond("List my recent Codex work", None, True))
+    assert "Plan a small rover" in listing and "Fix weather display" in listing
+    assert provider.sensitive_output is True
+    answer = asyncio.run(provider.respond("Tell me about the rover task", None, True))
+    assert answer == "A short spoken reply."
+    sent = json.dumps(client.requests[-1][2])
+    assert "Can it be electric?" in sent and "small battery" in sent
+    assert "private output" not in sent
+    assert provider.sensitive_output is True
+    assert provider.last_source == "chatgpt_plan"
+    assert (tmp_path / "conversation.local.json").exists()
+    after_restart = ConversationProvider(tmp_path / "projects.local.json", client=client)
+    assert after_restart._active_codex_title == "Plan a small rover"
+    assert len(after_restart.turns) >= 2
+    encoded = provider.compact_device_memory()
+    assert len(encoded) < 900
+    recovered = ConversationProvider(tmp_path / "fresh" / "projects.local.json", client=client)
+    recovered.restore_device_memory(encoded)
+    assert recovered._active_codex_title == "Plan a small rover"
+    assert recovered.turns
+
+
+def test_new_conversation_clears_old_context_and_rejects_stale_device_memory(tmp_path):
+    client = FakePlanClient()
+    project_file = tmp_path / "projects.local.json"
+    provider = ConversationProvider(project_file, client=client)
+    asyncio.run(provider.respond("Tell me a short fact", None, True))
+    old_id = provider.conversation_id
+    old_device_memory = provider.compact_device_memory()
+    answer = asyncio.run(provider.respond("Start a new conversation", None, True))
+    assert "new Sashmo conversation" in answer
+    assert provider.conversation_id != old_id
+    assert not provider.turns
+    restarted = ConversationProvider(project_file, client=client)
+    restarted.restore_device_memory(old_device_memory)
+    assert restarted.conversation_id == provider.conversation_id
+    assert not restarted.turns
 
 
 def test_named_project_discussion_sends_only_user_briefing_and_git_status(tmp_path):

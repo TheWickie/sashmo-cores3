@@ -11,6 +11,8 @@ work/
 .venv/
 config.local.json
 projects.local.json
+conversation.local.json
+conversation.tmp
 firmware/Sashmo/config_private.h
 *.log
 __pycache__/

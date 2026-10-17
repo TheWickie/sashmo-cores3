@@ -42,6 +42,98 @@ class ProjectSummary:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class WorkSummary:
+    """A saved Codex task title; the id stays on the desktop."""
+
+    thread_id: str
+    title: str
+    source: str
+    updated_at: int | None
+
+    def as_dict(self) -> dict[str, str | int | None]:
+        return asdict(self)
+
+
+_SENSITIVE_TEXT = re.compile(
+    r"sk-[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{20,}|"
+    r"(?i:password|api[_ -]?key|secret|token)\s*[:=]\s*\S+"
+)
+
+
+def _safe_text(value: Any, limit: int) -> str:
+    if not isinstance(value, str):
+        return ""
+    clean = _SENSITIVE_TEXT.sub("[redacted]", value)
+    clean = " ".join(clean.split())
+    return clean[:limit]
+
+
+async def recent_work(client: RpcClient, limit: int = 10) -> list[WorkSummary]:
+    """Read recent CLI, VS Code and app-server task titles, including folderless work."""
+    if not 1 <= limit <= 10:
+        raise ValueError("limit must be between 1 and 10")
+    result = await client.request("thread/list", {
+        "limit": limit, "sortKey": "recency_at", "sortDirection": "desc",
+        "sourceKinds": ["cli", "vscode", "appServer"], "archived": False,
+        "useStateDbOnly": True,
+    })
+    rows = result.get("data") if isinstance(result, dict) else None
+    if not isinstance(rows, list):
+        return []
+    summaries: list[WorkSummary] = []
+    for row in rows[:limit]:
+        if not isinstance(row, dict):
+            continue
+        thread_id = row.get("id")
+        if not isinstance(thread_id, str) or not 1 <= len(thread_id) <= 128:
+            continue
+        title = _safe_text(row.get("name") or row.get("preview"), 100)
+        if not title:
+            title = "Untitled Codex task"
+        source = row.get("source")
+        summaries.append(WorkSummary(thread_id, title,
+                                     source if source in {"cli", "vscode", "appServer"} else "unknown",
+                                     _timestamp(row.get("recencyAt") or row.get("updatedAt"))))
+    return summaries
+
+
+def _message_text(item: dict[str, Any]) -> str:
+    if item.get("type") == "agentMessage" and item.get("phase") == "final_answer":
+        return _safe_text(item.get("text"), 800)
+    if item.get("type") == "userMessage":
+        parts = []
+        for block in (item.get("content") or [])[:5]:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(_safe_text(block.get("text"), 400))
+        return _safe_text(" ".join(parts), 400)
+    return ""
+
+
+async def work_excerpt(client: RpcClient, thread_id: str) -> list[dict[str, str]]:
+    """Return bounded user requests and final Codex answers; omit tools and reasoning."""
+    if not isinstance(thread_id, str) or not 1 <= len(thread_id) <= 128:
+        raise ValueError("Invalid thread id")
+    result = await client.request("thread/turns/list", {
+        "threadId": thread_id, "limit": 12, "sortDirection": "desc", "itemsView": "summary",
+    })
+    rows = result.get("data") if isinstance(result, dict) else None
+    if not isinstance(rows, list):
+        return []
+    messages: list[dict[str, str]] = []
+    for turn in reversed(rows[:12]):
+        if not isinstance(turn, dict):
+            continue
+        for item in (turn.get("items") or [])[:20]:
+            if not isinstance(item, dict):
+                continue
+            role = {"userMessage": "user", "agentMessage": "assistant"}.get(item.get("type"))
+            text = _message_text(item)
+            if role and text:
+                messages.append({"role": role, "text": text})
+    return messages[-12:]
+
+
 def _workspace_name(cwd: Any) -> tuple[str, str] | None:
     if not isinstance(cwd, str) or not cwd or len(cwd) > 1024:
         return None

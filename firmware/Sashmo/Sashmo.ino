@@ -58,6 +58,7 @@ uint32_t lastInteractionMs = 0;
 uint8_t appliedBrightness = 0;
 bool displaySleeping = false;
 int volumePercent = 63;
+String conversationMemory;
 int16_t* wakeSamples = nullptr;
 int16_t* wakeTail = nullptr;
 bool wakeMicActive = false;
@@ -588,10 +589,11 @@ bool pushToTalkOnce(bool followUp) {
   HTTPClient http;
   http.begin(baseUrl() + "/v1/voice");
   http.setTimeout(60000);
-  const char* responseHeaders[] = {"X-Sashmo-Volume-Percent"};
-  http.collectHeaders(responseHeaders, 1);
+  const char* responseHeaders[] = {"X-Sashmo-Volume-Percent", "X-Sashmo-Memory"};
+  http.collectHeaders(responseHeaders, 2);
   http.addHeader("X-Sashmo-Token", kDeviceToken);
   http.addHeader("Content-Type", "audio/wav");
+  if (!conversationMemory.isEmpty()) http.addHeader("X-Sashmo-Memory", conversationMemory);
   if (followUp) http.addHeader("X-Sashmo-Follow-Up", "1");
   const int status = http.POST(wav, wavBytes);
   free(wav);
@@ -611,6 +613,15 @@ bool pushToTalkOnce(bool followUp) {
   if (!requestedVolume.isEmpty()) {
     const int requested = requestedVolume.toInt();
     if (requested >= 0 && requested <= 100) setVolumePercent(requested);
+  }
+  const String newMemory = http.header("X-Sashmo-Memory");
+  if (!newMemory.isEmpty() && newMemory.length() <= 900 && newMemory != conversationMemory) {
+    conversationMemory = newMemory;
+    Preferences preferences;
+    if (preferences.begin("sashmo", false)) {
+      preferences.putString("memory", conversationMemory);
+      preferences.end();
+    }
   }
 
   const int replySize = http.getSize();
@@ -773,6 +784,8 @@ void setup() {
   Preferences preferences;
   if (preferences.begin("sashmo", true)) {
     volumePercent = min(100, static_cast<int>(preferences.getUChar("volume", 63)));
+    conversationMemory = preferences.getString("memory", "");
+    if (conversationMemory.length() > 900) conversationMemory = "";
     preferences.end();
   }
   readPower();

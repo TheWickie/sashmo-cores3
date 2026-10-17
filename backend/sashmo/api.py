@@ -164,6 +164,8 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         store.voice_state = "processing"
         follow_up = request.headers.get("X-Sashmo-Follow-Up") == "1"
+        if voice_provider is not None and hasattr(voice_provider, "restore_device_memory"):
+            voice_provider.restore_device_memory(request.headers.get("X-Sashmo-Memory"))
         try:
             transcript, answer, output = await process_audio(audio, store.quota, store.codex_connected,
                                                              provider=voice_provider,
@@ -183,6 +185,10 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
         volume = getattr(voice_provider, "volume_percent", None)
         if volume is not None:
             headers["X-Sashmo-Volume-Percent"] = str(volume)
+        if voice_provider is not None and hasattr(voice_provider, "compact_device_memory"):
+            memory = voice_provider.compact_device_memory()
+            if memory:
+                headers["X-Sashmo-Memory"] = memory
         return Response(
             output,
             media_type="audio/wav",

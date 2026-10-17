@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from sashmo.codex_sessions import recent_sessions, recent_projects
+from sashmo.codex_sessions import recent_sessions, recent_projects, recent_work, work_excerpt
 
 
 class FakeRpc:
@@ -67,3 +67,32 @@ def test_recent_projects_deduplicates_workspaces_and_skips_chat_scratch():
     assert "private" not in str(items)
     assert "G:" not in str(items)
     assert all(method == "thread/list" for method, _ in rpc.calls)
+
+
+def test_recent_work_includes_folderless_vscode_task_by_preview():
+    rpc = FakeRpc([{"id": "task-1", "source": "vscode", "preview": "Plan a small rover",
+                    "recencyAt": 50},
+                   {"id": "task-2", "source": "cli", "name": "Fix dashboard",
+                    "cwd": r"C:\private\source"}])
+    items = asyncio.run(recent_work(rpc))
+    assert [(item.title, item.source) for item in items] == [
+        ("Plan a small rover", "vscode"), ("Fix dashboard", "cli")]
+    assert "private" not in str(items)
+    assert rpc.calls[0][1]["sourceKinds"] == ["cli", "vscode", "appServer"]
+
+
+def test_work_excerpt_only_uses_requests_and_final_answers():
+    class ExcerptRpc:
+        async def request(self, method, params=None, timeout=30):
+            assert method == "thread/turns/list"
+            return {"data": [{"items": [
+                {"type": "reasoning", "text": "hidden reasoning"},
+                {"type": "commandExecution", "aggregatedOutput": "hidden tool output"},
+                {"type": "userMessage", "content": [{"type": "text", "text": "Design a rover"}]},
+                {"type": "agentMessage", "phase": "commentary", "text": "intermediate"},
+                {"type": "agentMessage", "phase": "final_answer", "text": "The rover uses four wheels."},
+            ]}]}
+    items = asyncio.run(work_excerpt(ExcerptRpc(), "task-1"))
+    assert items == [{"role": "user", "text": "Design a rover"},
+                     {"role": "assistant", "text": "The rover uses four wheels."}]
+    assert "hidden" not in str(items)

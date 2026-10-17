@@ -331,7 +331,7 @@ class SashmoDesktop(tk.Tk):
         self.codex_state.pack(anchor="w", padx=23)
         self.codex_updated = self._label(codex_card, "Last quota update: —", 10, MUTED)
         self.codex_updated.pack(anchor="w", padx=23, pady=(4, 4))
-        self.codex_tasks = self._label(codex_card, "Recent Codex tasks: —", 10, MUTED)
+        self.codex_tasks = self._label(codex_card, "Recent Codex work: —", 10, MUTED)
         self.codex_tasks.pack(anchor="w", padx=23, pady=(0, 18))
 
     def _build_settings(self) -> None:
@@ -386,7 +386,7 @@ class SashmoDesktop(tk.Tk):
         request_actions.pack(fill="x", pady=(0, 16))
         self._button(request_actions, "Send to Codex", lambda: self._codex_request_action("approve"), True).pack(side="left")
         self._button(request_actions, "Dismiss", lambda: self._codex_request_action("reject")).pack(side="left", padx=10)
-        self._label(page, "TEN MOST RECENT CODEX PROJECTS", 10, MUTED, "bold").pack(anchor="w", pady=(0, 5))
+        self._label(page, "TEN MOST RECENT CODEX TASKS", 10, MUTED, "bold").pack(anchor="w", pady=(0, 5))
         self.recent_projects_note = self._label(page, "Waiting for Codex…", 10, TEXT,
                                                 wraplength=650, justify="left")
         self.recent_projects_note.pack(anchor="w", pady=(0, 15))
@@ -1056,8 +1056,8 @@ class SashmoDesktop(tk.Tk):
             self.voice_state.configure(text="Desktop service unavailable")
             self.codex_state.configure(text="Service unavailable")
             self.codex_updated.configure(text="Last quota update: —")
-            self.codex_tasks.configure(text="Recent Codex tasks: —")
-            self.recent_projects_note.configure(text="Recent Codex projects unavailable while the service is offline")
+            self.codex_tasks.configure(text="Recent Codex work: —")
+            self.recent_projects_note.configure(text="Recent Codex work unavailable while the service is offline")
             self.codex_request_note.configure(text="Voice request review unavailable while the service is offline")
             self.diagnostic_summary.configure(text=f"Service unavailable ({error or 'no response'}). {self.last_message}")
             return
@@ -1091,18 +1091,21 @@ class SashmoDesktop(tk.Tk):
         self.codex_updated.configure(text=f"Last quota update: {_local_datetime(codex.get('last_updated_local'))}")
         sessions = status.get("codex_sessions") or {}
         if sessions.get("error"):
-            self.codex_tasks.configure(text="Recent Codex tasks: unavailable")
+            self.codex_tasks.configure(text="Recent Codex work: unavailable")
         else:
             items = sessions.get("items") or []
             active = sum(item.get("state") == "in_progress" for item in items)
-            self.codex_tasks.configure(text=f"Recent Codex tasks: {active} active · {len(items)} listed")
-        projects_status = status.get("codex_projects") or {}
-        if projects_status.get("error"):
-            recent_text = "Recent Codex projects are unavailable"
+            work = (status.get("codex_work") or {}).get("items") or []
+            newest = str(work[0].get("title") or "")[:78] if work else ""
+            self.codex_tasks.configure(text=(f"Recent Codex work: {newest}" if newest else
+                                       f"Recent Codex tasks: {active} active · {len(items)} listed"))
+        work_status = status.get("codex_work") or {}
+        if work_status.get("error"):
+            recent_text = "Recent Codex work is unavailable"
         else:
-            recent = projects_status.get("items") or []
-            recent_text = "  ·  ".join(f"{index}. {item.get('name') or 'Unnamed'}"
-                                      for index, item in enumerate(recent[:10], 1)) or "No recent project folders found"
+            recent = work_status.get("items") or []
+            recent_text = "\n".join(f"{index}. {item.get('title') or 'Untitled Codex task'}"
+                                    for index, item in enumerate(recent[:10], 1)) or "No recent Codex tasks found"
         self.recent_projects_note.configure(text=recent_text)
         task_requests = status.get("codex_task_requests") or {}
         request = task_requests.get("pending") or {}

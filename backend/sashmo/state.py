@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .codex_rpc import CodexAppServer
-from .codex_sessions import recent_sessions, recent_projects
+from .codex_sessions import recent_sessions, recent_projects, recent_work
 from .quota import normalize_quota
 
 
@@ -42,6 +42,8 @@ class StateStore:
         self.codex_sessions_error: str | None = "Waiting for Codex"
         self.codex_projects: list[dict[str, Any]] = []
         self.codex_projects_error: str | None = "Waiting for Codex"
+        self.codex_work: list[dict[str, Any]] = []
+        self.codex_work_error: str | None = "Waiting for Codex"
         self.telemetry_path = telemetry_path
 
     def update(self, quota: dict[str, Any] | None, connected: bool, error: str | None) -> None:
@@ -108,6 +110,12 @@ class StateStore:
         if projects is not None:
             self.codex_projects = projects
         self.codex_projects_error = error
+
+    def update_codex_work(self, work: list[dict[str, Any]] | None,
+                          error: str | None) -> None:
+        if work is not None:
+            self.codex_work = work
+        self.codex_work_error = error
 
     def notify(self, key: str, title: str, summary: str) -> None:
         """Replace one local alert by stable key; do not include credentials or transcripts."""
@@ -185,6 +193,10 @@ class StateStore:
                          "error": self.calendar_error, "snapshot": self.calendar_snapshot},
             "codex_sessions": {"error": self.codex_sessions_error, "items": self.codex_sessions},
             "codex_projects": {"error": self.codex_projects_error, "items": self.codex_projects},
+            "codex_work": {"error": self.codex_work_error,
+                           "items": [{"title": item["title"], "source": item["source"],
+                                      "updated_at": item["updated_at"]}
+                                     for item in self.codex_work]},
         }
 
 
@@ -227,6 +239,11 @@ class QuotaWorker:
                         self.state.update_codex_projects([item.as_dict() for item in projects], None)
                     except (Exception, asyncio.TimeoutError):
                         self.state.update_codex_projects(None, "Recent Codex projects unavailable")
+                    try:
+                        work = await asyncio.wait_for(recent_work(rpc, limit=10), timeout=30)
+                        self.state.update_codex_work([item.as_dict() for item in work], None)
+                    except (Exception, asyncio.TimeoutError):
+                        self.state.update_codex_work(None, "Recent Codex work unavailable")
                     try:
                         await asyncio.wait_for(rpc.updated.wait(), timeout=self.poll_seconds)
                     except asyncio.TimeoutError:
