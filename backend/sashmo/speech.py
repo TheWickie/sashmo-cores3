@@ -147,7 +147,7 @@ def normalize_reply_wav(data: bytes) -> bytes:
                 raise ValueError("Reply audio exceeds duration limit")
     except wave.Error as exc:
         raise ValueError("Invalid reply WAV data") from exc
-    if len(samples) + 44 > 700_000:
+    if len(samples) + 44 > 1_000_000:
         raise ValueError("Reply audio exceeds device limit")
     output = io.BytesIO()
     with wave.open(output, "wb") as writer:
@@ -162,25 +162,37 @@ async def synthesize_reply(text: str) -> bytes:
     key = API_KEY_FILE.read_text(encoding="utf-8-sig").strip() if API_KEY_FILE.is_file() else ""
     if not key:
         raise RuntimeError("Cedar speech is not configured")
-    for attempt in range(2):
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    SPEECH_URL,
-                    headers={"Authorization": f"Bearer {key}"},
-                    json={
-                        "model": SPEECH_MODEL,
-                        "voice": SPEECH_VOICE,
-                        "input": text,
-                        "instructions": "Speak in a calm, warm, reassuring tone. Be clear and natural.",
-                        "response_format": "wav",
-                    },
-                )
-            response.raise_for_status()
-            return normalize_reply_wav(response.content)
-        except (httpx.HTTPError, ValueError):
-            if attempt == 0:
-                await asyncio.sleep(0.5)
+    candidates = [text]
+    for limit in (200, 120):
+        if len(text) > limit:
+            candidate = text[:limit].rsplit(" ", 1)[0].rstrip(".,; ") + ". Ask me for more."
+            if candidate not in candidates:
+                candidates.append(candidate)
+    for candidate in candidates:
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        SPEECH_URL,
+                        headers={"Authorization": f"Bearer {key}"},
+                        json={
+                            "model": SPEECH_MODEL,
+                            "voice": SPEECH_VOICE,
+                            "input": candidate,
+                            "instructions": "Speak in a calm, warm, reassuring tone. Be clear and natural.",
+                            "response_format": "wav",
+                        },
+                    )
+                response.raise_for_status()
+                try:
+                    return normalize_reply_wav(response.content)
+                except ValueError:
+                    break  # The reply is too long; generate a shorter version.
+            except httpx.HTTPError:
+                if attempt == 0:
+                    await asyncio.sleep(0.5)
+        else:
+            break  # HTTP failed twice; shortening text would not help.
     LOG.warning("Cedar speech output unavailable after retry")
     raise RuntimeError("Cedar speech output unavailable")
 

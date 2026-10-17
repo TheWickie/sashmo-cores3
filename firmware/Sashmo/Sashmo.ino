@@ -17,7 +17,7 @@ constexpr int kEndSilenceChunks = 10;
 constexpr size_t kWakeSamples = kSampleRate * 2;
 constexpr size_t kWakeTailSamples = kSampleRate;
 constexpr size_t kWavHeaderBytes = 44;
-constexpr size_t kMaxReplyBytes = 700000;
+constexpr size_t kMaxReplyBytes = 1000000;
 
 enum class ScreenState { Idle, Listening, Processing, Speaking, Details, Notifications, Volume, Disconnected, Error };
 

@@ -46,6 +46,17 @@ def test_streaming_wav_header_is_normalized_for_device():
         assert reader.getnframes() == 2400
 
 
+def test_full_length_cedar_reply_fits_device_limit():
+    output = io.BytesIO()
+    with wave.open(output, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(24000)
+        writer.writeframes(b"\0\0" * (24000 * 18))
+    result = normalize_reply_wav(output.getvalue())
+    assert 700_000 < len(result) < 1_000_000
+
+
 def test_longer_questions_fit_the_new_voice_limit():
     def wav_seconds(seconds):
         output = io.BytesIO()
