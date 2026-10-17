@@ -6,6 +6,7 @@
 #include <esp_heap_caps.h>
 
 #include "config_private.h"
+#include "splash_image.h"
 
 constexpr uint32_t kSampleRate = 16000;
 constexpr size_t kRecordSamples = kSampleRate * 4;
@@ -244,6 +245,20 @@ void render() {
     case ScreenState::Disconnected: drawActivity("Offline", "Reconnecting", 0xFBE0); break;
     case ScreenState::Error: drawActivity("Error", errorText.c_str(), 0xF800); break;
   }
+}
+
+void drawSplash() {
+  M5.Display.fillScreen(0xC6F8);
+  if (!M5.Display.drawJpg(kSplashJpeg, kSplashJpegBytes, 0, 0)) {
+    Serial.println("Splash image unavailable");
+  }
+  M5.Display.setTextColor(0x1823, 0xC6F8);
+  M5.Display.setTextSize(2);
+  M5.Display.setCursor(8, 218);
+  M5.Display.print("SASHMO");
+  M5.Display.setTextSize(1);
+  M5.Display.setCursor(253, 225);
+  M5.Display.print("STARTING");
 }
 
 void readPower() {
@@ -518,11 +533,13 @@ void setup() {
   Serial.printf("SASHMO boot battery=%d%% battery_mv=%d present=%d charging=%d vbus=%d mV\n",
                 batteryLevel, M5.Power.getBatteryVoltage(), M5.Power.Axp2101.getBatState(),
                 charging, M5.Power.getVBUSVoltage());
-  render();
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.begin(kWifiSsid, kWifiPassword);
   lastWifiAttemptMs = millis();
+  drawSplash();
+  delay(1600);
+  render();
 }
 
 void loop() {

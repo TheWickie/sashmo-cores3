@@ -1,6 +1,10 @@
 # Sashmo
 
+[Project page](https://3d-palace.com/sashmo) · [Privacy policy](https://3d-palace.com/sashmo/privacy) · [Terms of use](https://3d-palace.com/sashmo/terms)
+
 Sashmo is an open-source voice and status companion for the M5Stack CoreS3 and a Windows PC. The CoreS3 provides the touchscreen, microphone, speaker and battery-powered Wi-Fi connection. A local Windows service retrieves reported Codex usage and handles read-only voice questions; a desktop dashboard starts the service and shows device status.
+
+The Labrador illustration in `assets/sashmo-labrador.png` is the project mascot. A small JPEG version appears briefly when the CoreS3 starts.
 
 This is an active hardware project. Push-to-talk, quota display, battery telemetry and the dashboard work. Optional ChatGPT plan conversation is prepared but awaits account sign-in and live verification. Gmail metadata and Calendar upcoming-event connections are prepared but await Google consent and live verification. See [Phase 2 status](docs/PHASE2.md) for verified behaviour and release blockers.
 
