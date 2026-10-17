@@ -470,7 +470,22 @@ class SashmoDesktop(tk.Tk):
         self.model_var = tk.StringVar()
         self.model_box = ttk.Combobox(models, textvariable=self.model_var, state="readonly", width=42)
         self.model_box.pack(anchor="w", padx=24, pady=(0, 12))
-        self._button(models, "Use selected model", self._select_model, True).pack(anchor="w", padx=24, pady=(0, 22))
+        self._button(models, "Use selected model", self._select_model, True).pack(anchor="w", padx=24, pady=(0, 18))
+        self.auto_model_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(models, text="Automatically use a stronger model for complex questions",
+                       variable=self.auto_model_var, bg=PANEL, fg=TEXT,
+                       selectcolor=PANEL_LIGHT, activebackground=PANEL,
+                       activeforeground=TEXT, font=("Segoe UI", 11), anchor="w").pack(
+                           anchor="w", padx=20, pady=(0, 8))
+        self._label(models, "Complex questions model", 10, MUTED).pack(anchor="w", padx=24)
+        self.complex_model_var = tk.StringVar()
+        self.complex_model_box = ttk.Combobox(models, textvariable=self.complex_model_var,
+                                              state="readonly", width=42)
+        self.complex_model_box.pack(anchor="w", padx=24, pady=(5, 10))
+        self._button(models, "Save automatic switching", self._save_auto_model).pack(
+            anchor="w", padx=24, pady=(0, 8))
+        self.auto_model_status = self._label(models, "Quick replies use the selected model above.", 9, MUTED)
+        self.auto_model_status.pack(anchor="w", padx=24, pady=(0, 20))
         self._label(page, "Basic quota, time and connection answers stay local. A selected model handles other "
                     "questions through your ChatGPT plan. It never falls back to billed text API inference.",
                     10, MUTED, wraplength=620, justify="left").pack(anchor="w", pady=(18, 0))
@@ -687,6 +702,7 @@ class SashmoDesktop(tk.Tk):
             self.account_status.configure(text="Saved account could not be read; check Diagnostics", fg=AMBER)
             return
         self.account_choices = {}
+        self.account_summaries = {account["key"]: account for account in accounts or []}
         selected = ""
         for account in accounts or []:
             label = f"{account.get('email') or 'ChatGPT account'} · {account['key'][:6]}"
@@ -698,6 +714,9 @@ class SashmoDesktop(tk.Tk):
         if selected:
             active = next(account for account in accounts or [] if account["key"] == self.account_choices[selected])
             model = active.get("model")
+            self.selected_account_model = model
+            self.selected_complex_model = active.get("complex_model")
+            self.auto_model_var.set(bool(active.get("auto_model")))
             self.account_status.configure(text="Connected · model selected" if model else
                                           "Connected · choose a model to enable conversation", fg=ACCENT)
             self._refresh_models()
@@ -706,11 +725,18 @@ class SashmoDesktop(tk.Tk):
             self.model_status.configure(text="Sign in to see available models")
             self.model_box["values"] = []
             self.model_var.set("")
+            self.complex_model_box["values"] = []
+            self.complex_model_var.set("")
+            self.auto_model_var.set(False)
 
     def _refresh_models(self) -> None:
         key = self.account_choices.get(self.account_var.get())
         if not key:
             return
+        account = getattr(self, "account_summaries", {}).get(key, {})
+        self.selected_account_model = account.get("model")
+        self.selected_complex_model = account.get("complex_model")
+        self.auto_model_var.set(bool(account.get("auto_model")))
         self.model_status.configure(text="Checking models available to this account…")
         def work() -> None:
             try:
@@ -726,8 +752,16 @@ class SashmoDesktop(tk.Tk):
         self.available_models = {f"{item['display_name']} · {item['slug']}": item["slug"]
                                  for item in models or []}
         self.model_box["values"] = list(self.available_models)
+        self.complex_model_box["values"] = list(self.available_models)
         self.model_status.configure(text=f"{len(self.available_models)} available model(s). Select one to enable conversation.")
-        self.model_var.set("")
+        selected = next((label for label, slug in self.available_models.items()
+                         if slug == getattr(self, "selected_account_model", None)), "")
+        complex_selected = next((label for label, slug in self.available_models.items()
+                                 if slug == getattr(self, "selected_complex_model", None)), "")
+        self.model_var.set(selected)
+        self.complex_model_var.set(complex_selected)
+        self.auto_model_status.configure(text="Automatic switching is on." if self.auto_model_var.get()
+                                         else "Quick replies use the selected model above.")
 
     def _sign_in_chatgpt(self) -> None:
         if self.account_busy:
@@ -758,6 +792,21 @@ class SashmoDesktop(tk.Tk):
                 self.results.put(("account_action", "Conversation model enabled"))
             except Exception as exc:
                 self.results.put(("account_action", f"Could not select model: {exc}"))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _save_auto_model(self) -> None:
+        key = self.account_choices.get(self.account_var.get())
+        enabled = self.auto_model_var.get()
+        model = self.available_models.get(self.complex_model_var.get())
+        if not key or (enabled and not model):
+            self.auto_model_status.configure(text="Choose an account and a complex questions model first.")
+            return
+        def work() -> None:
+            try:
+                self.account_client.configure_auto_model(key, enabled, model)
+                self.results.put(("account_action", "Automatic model switching saved"))
+            except Exception as exc:
+                self.results.put(("account_action", f"Could not save model switching: {exc}"))
         threading.Thread(target=work, daemon=True).start()
 
     def _forget_account(self) -> None:

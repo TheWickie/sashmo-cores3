@@ -95,6 +95,15 @@ def test_registration_id_token_storage_and_streaming(signed_client):
     client.select_model(key, "allowed")
     assert client.active_selection() == (key, "allowed")
     assert client.account_summaries()[0]["model"] == "allowed"
+    assert client.routed_model(key, "allowed", True) == "allowed"
+    client.configure_auto_model(key, True, "allowed")
+    assert client.account_summaries()[0]["auto_model"] is True
+    assert client.routed_model(key, "base", False) == "base"
+    assert client.routed_model(key, "base", True) == "allowed"
+    with pytest.raises(SIWCError, match="available model"):
+        client.configure_auto_model(key, True, "hidden")
+    client.configure_auto_model(key, False, None)
+    assert client.routed_model(key, "base", True) == "base"
     assert "access_token" not in client.account_summaries()[0]
     with pytest.raises(SIWCError, match="Select a model"):
         client.stream_text(key, "hidden", [{"role": "user", "content": "Hello"}])

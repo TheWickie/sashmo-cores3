@@ -201,6 +201,8 @@ class SIWCClient:
             return [{"key": key, "email": account.get("email"),
                      "active": data.get("active") == key,
                      "model": account.get("selected_model"),
+                     "auto_model": account.get("auto_model", False),
+                     "complex_model": account.get("complex_model"),
                      "expires_at": account.get("expires_at")}
                     for key, account in data["accounts"].items()]
 
@@ -230,6 +232,27 @@ class SIWCClient:
             data["accounts"][key]["selected_model"] = model
             data["active"] = key
             self.store.save(data)
+
+    def configure_auto_model(self, key: str, enabled: bool, complex_model: str | None) -> None:
+        if enabled and (not complex_model or complex_model not in
+                        {item["slug"] for item in self.list_models(key)}):
+            raise SIWCError("Choose an available model for complex questions")
+        with self.store.locked():
+            data = self.store.load()
+            if key not in data["accounts"]:
+                raise SIWCError("That ChatGPT account is not saved")
+            data["accounts"][key]["auto_model"] = bool(enabled)
+            data["accounts"][key]["complex_model"] = complex_model if enabled else None
+            self.store.save(data)
+
+    def routed_model(self, key: str, base_model: str, complex_question: bool) -> str:
+        if not complex_question:
+            return base_model
+        with self.store.locked():
+            account = self.store.load()["accounts"].get(key, {})
+            if account.get("auto_model") and isinstance(account.get("complex_model"), str):
+                return account["complex_model"]
+        return base_model
 
     def forget_account(self, key: str) -> None:
         """Remove local credentials; remote grant can be revoked in ChatGPT settings."""

@@ -43,6 +43,15 @@ def _long_answer_requested(transcript: str) -> bool:
                           r"step.by.step|full explanation|pages|more detail)\b",
                           transcript, re.IGNORECASE))
 
+
+def _complex_question(transcript: str) -> bool:
+    """Route explicit analysis requests without sending an extra classification call."""
+    return _long_answer_requested(transcript) or bool(re.search(
+        r"\b(?:analyse|analyze|analysis|compare|comparison|evaluate|assessment|"
+        r"tradeoffs?|pros and cons|recommend|recommendation|strategy|strategic|"
+        r"plan|planning|design|architecture|debug|diagnose|review|critique|"
+        r"reason through|think through|complex)\b", transcript, re.IGNORECASE))
+
 _VOLUME_ONES = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
                 "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9}
 _VOLUME_TEENS = {"ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
@@ -276,6 +285,7 @@ class ConversationProvider:
         if selection is None:
             return f"I found {selected['title']}. Connect a ChatGPT model in the desktop dashboard to discuss its content."
         key, model = selection
+        model = self._model_for(client, key, model, True)
         reference = json.dumps(excerpt, ensure_ascii=False)
         messages = [{"role": "developer", "content": _LONG_GUIDANCE if self.long_reply else _GUIDANCE},
                     {"role": "user", "content": "Read-only Codex task reference data. "
@@ -319,6 +329,11 @@ class ConversationProvider:
         except SIWCError:
             return None
         return self.client
+
+    @staticmethod
+    def _model_for(client: SIWCClient, key: str, model: str, complex_question: bool) -> str:
+        router = getattr(client, "routed_model", None)
+        return router(key, model, complex_question) if callable(router) else model
 
     @staticmethod
     def _local_command(transcript: str, quota: dict[str, Any] | None, connected: bool) -> str | None:
@@ -487,6 +502,8 @@ class ConversationProvider:
                 return answer_command(transcript, quota, connected)
             key, model = selection
             project_context = await asyncio.to_thread(self.registry.discussion_context, transcript)
+            model = self._model_for(client, key, model,
+                                    bool(project_context) or _complex_question(transcript))
             messages = [{"role": "developer", "content": _LONG_GUIDANCE if self.long_reply else _GUIDANCE},
                         *self._conversation_messages(transcript)]
             if project_context:

@@ -17,6 +17,18 @@ class FakePlanClient:
         return "A short spoken reply."
 
 
+def test_complex_questions_route_to_selected_stronger_model(tmp_path):
+    class RoutedClient(FakePlanClient):
+        def routed_model(self, key, base_model, complex_question):
+            return "stronger-model" if complex_question else base_model
+
+    client = RoutedClient()
+    provider = ConversationProvider(tmp_path / "projects.local.json", client=client)
+    asyncio.run(provider.respond("Tell me a short fact.", None, True))
+    asyncio.run(provider.respond("Compare the tradeoffs in this design.", None, True))
+    assert [request[1] for request in client.requests] == ["listed-model", "stronger-model"]
+
+
 def test_local_quota_follow_up_uses_no_plan_inference(tmp_path):
     client = FakePlanClient()
     provider = ConversationProvider(tmp_path / "projects.local.json", client=client)
