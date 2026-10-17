@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('Recognize', 'Synthesize')][string]$Mode,
+    [Parameter(Mandatory = $true)][ValidateSet('Recognize', 'Wake', 'Synthesize')][string]$Mode,
     [string]$InputPath,
     [string]$OutputPath
 )
@@ -7,11 +7,14 @@ param(
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Speech
 
-if ($Mode -eq 'Recognize') {
+if ($Mode -eq 'Recognize' -or $Mode -eq 'Wake') {
     $culture = [Globalization.CultureInfo]::GetCultureInfo('en-GB')
     $recognizer = [System.Speech.Recognition.SpeechRecognitionEngine]::new($culture)
     try {
         $choices = [System.Speech.Recognition.Choices]::new()
+        if ($Mode -eq 'Wake') {
+            $choices.Add([string[]]@('Hello Sashmo'))
+        } else {
         $choices.Add([string[]]@(
             'How much Codex quota do I have left',
             'How much quota do I have left',
@@ -26,6 +29,7 @@ if ($Mode -eq 'Recognize') {
             'What is your connection status',
             'Are you connected'
         ))
+        }
         $builder = [System.Speech.Recognition.GrammarBuilder]::new()
         $builder.Culture = $culture
         $builder.Append($choices)

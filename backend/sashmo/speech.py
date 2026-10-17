@@ -46,7 +46,7 @@ def validate_wav(data: bytes, max_seconds: int = 6) -> None:
                 raise ValueError("Expected 16 kHz, mono, 16-bit PCM WAV")
             if reader.getnframes() > 16000 * max_seconds:
                 raise ValueError("Audio exceeds the duration limit")
-    except wave.Error as exc:
+    except (wave.Error, EOFError) as exc:
         raise ValueError("Invalid WAV data") from exc
 
 
@@ -71,6 +71,18 @@ def recognize(data: bytes) -> tuple[str | None, float]:
         result = _run_bridge("Recognize", path)
         parsed = json.loads(result.stdout.strip())
         return parsed.get("text"), float(parsed.get("confidence") or 0)
+
+
+def recognize_wake(data: bytes) -> bool:
+    """Check the wake phrase with Windows speech only; never use cloud STT."""
+    validate_wav(data, max_seconds=3)
+    with tempfile.TemporaryDirectory(prefix="sashmo-wake-") as temp:
+        path = Path(temp) / "wake.wav"
+        path.write_bytes(data)
+        result = _run_bridge("Wake", path)
+        parsed = json.loads(result.stdout.strip())
+        return (str(parsed.get("text") or "").casefold() == "hello sashmo"
+                and float(parsed.get("confidence") or 0) >= 0.8)
 
 
 async def transcribe(data: bytes) -> tuple[str | None, float]:

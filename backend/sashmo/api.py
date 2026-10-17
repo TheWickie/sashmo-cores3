@@ -21,7 +21,7 @@ from .conversation import ConversationProvider
 from .codex_tasks import CodexTaskManager
 from .gmail import GmailWorker
 from .projects import ProjectRegistry
-from .speech import process_audio, validate_wav
+from .speech import process_audio, recognize_wake, validate_wav
 from .state import QuotaWorker, StateStore
 
 
@@ -179,6 +179,28 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
             media_type="audio/wav",
             headers={"X-Sashmo-Recognized": "1" if transcript else "0", "Cache-Control": "no-store"},
         )
+
+    @app.post("/v1/wake")
+    async def wake(request: Request, x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
+        authenticate(x_sashmo_token)
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > 100_000:
+            raise HTTPException(status_code=413, detail="Audio too large")
+        audio = await request.body()
+        if len(audio) > 100_000:
+            raise HTTPException(status_code=413, detail="Audio too large")
+        try:
+            validate_wav(audio, max_seconds=3)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            detected = await run_in_threadpool(recognize_wake, audio)
+        except Exception:
+            LOG.exception("Local wake recognition failed")
+            store.record_wake_check(False)
+            return JSONResponse({"wake": False}, headers={"Cache-Control": "no-store"})
+        store.record_wake_check(detected)
+        return JSONResponse({"wake": detected}, headers={"Cache-Control": "no-store"})
 
     return app
 

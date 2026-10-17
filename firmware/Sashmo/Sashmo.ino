@@ -10,6 +10,8 @@
 
 constexpr uint32_t kSampleRate = 16000;
 constexpr size_t kRecordSamples = kSampleRate * 6;
+constexpr size_t kWakeSamples = kSampleRate * 2;
+constexpr size_t kWakeTailSamples = kSampleRate;
 constexpr size_t kWavHeaderBytes = 44;
 constexpr size_t kMaxReplyBytes = 700000;
 
@@ -51,6 +53,11 @@ bool wifiWasConnected = false;
 uint32_t lastInteractionMs = 0;
 uint8_t appliedBrightness = 0;
 bool displaySleeping = false;
+int16_t* wakeSamples = nullptr;
+int16_t* wakeTail = nullptr;
+bool wakeMicActive = false;
+bool wakeRecording = false;
+uint32_t wakeRecordingStartedMs = 0;
 
 String baseUrl() {
   return String("http://") + kServerHost + ":" + String(kServerPort);
@@ -163,7 +170,8 @@ void drawIdle() {
   M5.Display.setTextColor(0xBDF7, 0x0841);
   M5.Display.setTextSize(1);
   M5.Display.setCursor(116, 229);
-  M5.Display.print("TAP TO SPEAK");
+  M5.Display.print(kWakeWordEnabled && (usbPowered || kWakeOnBattery)
+                     ? "SAY HELLO SASHMO" : "TAP TO SPEAK");
 }
 
 void drawDetails() {
@@ -444,7 +452,14 @@ void failVoice(const String& message) {
   setState(serverConnected ? ScreenState::Idle : ScreenState::Disconnected);
 }
 
+void stopWakeListening() {
+  if (wakeMicActive) M5.Mic.end();
+  wakeMicActive = false;
+  wakeRecording = false;
+}
+
 void pushToTalk() {
+  stopWakeListening();
   if (WiFi.status() != WL_CONNECTED || !serverConnected) {
     failVoice("Desktop offline");
     return;
@@ -543,6 +558,96 @@ void pushToTalk() {
   nextPulseMs = millis();
 }
 
+void pollWakeWord(uint32_t now) {
+  const bool allowedPower = usbPowered || (kWakeOnBattery &&
+                            (batteryLevel < 0 || batteryLevel > kLowBatteryPercent));
+  const bool shouldListen = kWakeWordEnabled && allowedPower && serverConnected
+                         && WiFi.status() == WL_CONNECTED
+                         && screenState != ScreenState::Listening
+                         && screenState != ScreenState::Processing
+                         && screenState != ScreenState::Speaking;
+  if (!shouldListen) {
+    stopWakeListening();
+    return;
+  }
+  if (!wakeSamples) wakeSamples = static_cast<int16_t*>(heap_caps_malloc(
+      kWakeSamples * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!wakeTail) {
+    wakeTail = static_cast<int16_t*>(heap_caps_calloc(
+        kWakeTailSamples, sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  }
+  if (!wakeSamples || !wakeTail) return;
+  static uint32_t nextAttemptMs = 0;
+  if (!wakeMicActive) {
+    if (static_cast<int32_t>(now - nextAttemptMs) < 0) return;
+    M5.Speaker.end();
+    wakeMicActive = M5.Mic.begin();
+    if (!wakeMicActive) {
+      nextAttemptMs = now + 5000;
+      return;
+    }
+  }
+  if (!wakeRecording) {
+    wakeRecording = M5.Mic.record(wakeSamples, kWakeSamples, kSampleRate);
+    wakeRecordingStartedMs = now;
+    return;
+  }
+  if (M5.Mic.isRecording()) {
+    if (now - wakeRecordingStartedMs > 5000) {
+      stopWakeListening();
+      nextAttemptMs = now + 5000;
+    }
+    return;
+  }
+  wakeRecording = false;
+  uint64_t magnitude = 0;
+  int peak = 0;
+  for (size_t i = 0; i < kWakeSamples; ++i) {
+    const int sample = abs(static_cast<int>(wakeSamples[i]));
+    magnitude += sample;
+    peak = max(peak, sample);
+  }
+  bool detected = false;
+  if (peak >= 500 && magnitude / kWakeSamples >= 90) {
+    const size_t totalSamples = kWakeTailSamples + kWakeSamples;
+    const size_t wavBytes = kWavHeaderBytes + totalSamples * sizeof(int16_t);
+    uint8_t* wav = static_cast<uint8_t*>(heap_caps_malloc(
+        wavBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (wav) {
+      makeWavHeader(wav, totalSamples);
+      memcpy(wav + kWavHeaderBytes, wakeTail, kWakeTailSamples * sizeof(int16_t));
+      memcpy(wav + kWavHeaderBytes + kWakeTailSamples * sizeof(int16_t),
+             wakeSamples, kWakeSamples * sizeof(int16_t));
+      HTTPClient http;
+      http.begin(baseUrl() + "/v1/wake");
+      http.setTimeout(5000);
+      http.addHeader("X-Sashmo-Token", kDeviceToken);
+      http.addHeader("Content-Type", "audio/wav");
+      if (http.POST(wav, wavBytes) == 200) {
+        JsonDocument answer;
+        if (deserializeJson(answer, http.getString()) == DeserializationError::Ok)
+          detected = answer["wake"] | false;
+      }
+      http.end();
+      free(wav);
+    }
+  }
+  memcpy(wakeTail, wakeSamples + kWakeSamples - kWakeTailSamples,
+         kWakeTailSamples * sizeof(int16_t));
+  if (detected) {
+    Serial.println("WAKE phrase detected");
+    stopWakeListening();
+    wakeDisplay(millis());
+    M5.Speaker.setVolume(120);
+    if (M5.Speaker.begin()) {
+      M5.Speaker.tone(880, 120);
+      delay(150);
+      M5.Speaker.end();
+    }
+    pushToTalk();
+  }
+}
+
 void setup() {
   auto config = M5.config();
   M5.begin(config);
@@ -621,6 +726,7 @@ void loop() {
     }
   }
   updateDisplayStandby(now);
+  pollWakeWord(now);
   applyPowerProfile();
   render();
   delay(20);

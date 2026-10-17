@@ -1,6 +1,5 @@
 # Sashmo
 
-Project-specific website and policy links belong in a local deployment, not this source template.
 
 Sashmo is an open-source voice and status companion for the M5Stack CoreS3 and a Windows PC. The CoreS3 provides the touchscreen, microphone, speaker and battery-powered Wi-Fi connection. A local Windows service retrieves reported Codex usage and handles read-only voice questions; a desktop dashboard starts the service and shows device status.
 
@@ -87,6 +86,8 @@ When Gmail or Calendar is connected, the CoreS3 idle screen shows compact unread
 If a Google refresh fails, the dashboard marks cached information as potentially old, the device hides the affected count, and voice stops reporting it as current until the connection recovers.
 
 Tap the microphone control on the CoreS3 and speak within the six-second listening window. Local answers cover quota, reset time, time, date, connection status and recent Codex projects; other questions can use the selected ChatGPT plan model. A project coding request becomes a draft for desktop review. Tap the quota card for details and tap again to return. Voice and status use Wi-Fi; USB is needed for charging, flashing and optional serial diagnostics only.
+
+Hands-free wake is optional and off in a fresh installation. Set `wake_word_enabled` to `true` in the ignored `config.local.json` and reflash the CoreS3. It listens for **“Hello Sashmo”** while USB powered; set `wake_on_battery` to `true` and reflash if you accept shorter battery life. After the wake beep, speak your request during the six-second Listening screen. Wake clips are checked by Windows speech recognition on the desktop and are never sent to OpenAI; the request after waking follows the normal transcription and reply pipeline. Candidate wake clips travel over authenticated HTTP on the private LAN, which is not encrypted. The display can remain in standby while wake listening runs.
 
 If the PC's LAN address or service port changes, update `config.local.json` and reflash the CoreS3. Reserving the PC's address in the home router is a practical way to keep the current connection stable. Hostname or mDNS discovery is a future improvement.
 

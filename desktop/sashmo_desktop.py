@@ -368,6 +368,10 @@ class SashmoDesktop(tk.Tk):
         standby_minutes = int(config.get("screen_standby_after_seconds", 300)) // 60
         self._label(page, f"CoreS3 display standby: {standby_minutes} minutes on USB or battery. First tap wakes it.",
                     10, MUTED).pack(anchor="w", pady=(18, 4))
+        wake_power = "USB and battery" if config.get("wake_on_battery", False) else "USB power only"
+        wake_status = wake_power if config.get("wake_word_enabled", False) else "off"
+        self._label(page, f"'Hello Sashmo' wake listening: {wake_status}. Recognition stays on this PC.",
+                    10, MUTED).pack(anchor="w", pady=(0, 4))
         self._label(page, "Device standby and pulse settings are embedded in firmware; changing them requires a rebuild and flash.",
                     10, MUTED).pack(anchor="w")
 
@@ -1129,8 +1133,10 @@ class SashmoDesktop(tk.Tk):
         voice = status.get("voice") or {}
         voice_text = "Processing a voice request" if voice.get("state") == "processing" else "Ready for push-to-talk"
         self.voice_state.configure(text=voice_text)
-        self.voice_note.configure(text=("OpenAI transcription · Cedar speech · Windows fallback" if KEY_FILE.is_file()
-                                        else "Windows speech fallback · OpenAI key not found"))
+        speech_note = ("OpenAI transcription · Cedar speech · Windows fallback" if KEY_FILE.is_file()
+                       else "Windows speech fallback · OpenAI key not found")
+        self.voice_note.configure(text=f"{speech_note} · Offline wake checks: {voice.get('wake_checks', 0)}"
+                                       f" ({voice.get('wake_detections', 0)} heard)")
         self.diagnostic_summary.configure(
             text=f"Service started {_local_datetime((status.get('service') or {}).get('started_at_local'))}"
                  f"  ·  Last device pulse {_local_datetime(device.get('last_seen_local'))}"

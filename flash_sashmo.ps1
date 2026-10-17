@@ -61,6 +61,8 @@ $screenStandbyAfter = if ($null -eq $localConfig.screen_standby_after_seconds) {
 if ($screenStandbyAfter -lt 60 -or $screenStandbyAfter -gt 3600) { throw 'Display standby delay must be 60 through 3600 seconds.' }
 $lowBatteryPercent = if ($null -eq $localConfig.low_battery_percent) { 15 } else { [int]$localConfig.low_battery_percent }
 if ($lowBatteryPercent -lt 1 -or $lowBatteryPercent -gt 50) { throw 'Low-battery threshold must be 1 through 50 percent.' }
+$wakeEnabled = if ($null -eq $localConfig.wake_word_enabled) { $false } else { [bool]$localConfig.wake_word_enabled }
+$wakeOnBattery = if ($null -eq $localConfig.wake_on_battery) { $false } else { [bool]$localConfig.wake_on_battery }
 
 $lines = @(
     '#pragma once'
@@ -79,6 +81,8 @@ $lines = @(
     ('constexpr uint32_t kBatteryDimAfterSeconds = {0};' -f $batteryDimAfter)
     ('constexpr uint32_t kScreenStandbyAfterSeconds = {0};' -f $screenStandbyAfter)
     ('constexpr int kLowBatteryPercent = {0};' -f $lowBatteryPercent)
+    ('constexpr bool kWakeWordEnabled = {0};' -f $wakeEnabled.ToString().ToLowerInvariant())
+    ('constexpr bool kWakeOnBattery = {0};' -f $wakeOnBattery.ToString().ToLowerInvariant())
 )
 [IO.File]::WriteAllText($header, ($lines -join "`n") + "`n", [Text.Encoding]::ASCII)
 

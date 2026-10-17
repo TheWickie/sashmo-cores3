@@ -30,6 +30,9 @@ class StateStore:
         self.voice_state = "idle"
         self.voice_provider = "local"
         self.last_voice_local: str | None = None
+        self.wake_checks = 0
+        self.wake_detections = 0
+        self.last_wake_local: str | None = None
         self.notifications: list[dict[str, str]] = []
         self.gmail_snapshot: dict[str, Any] | None = None
         self.gmail_error: str | None = "Not connected"
@@ -116,6 +119,12 @@ class StateStore:
         self.notifications = self.notifications[-10:]
         self.version += 1
 
+    def record_wake_check(self, detected: bool) -> None:
+        self.wake_checks += 1
+        if detected:
+            self.wake_detections += 1
+            self.last_wake_local = datetime.now().astimezone().isoformat(timespec="seconds")
+
     def clear_notification(self, key: str) -> None:
         remaining = [entry for entry in self.notifications if entry["key"] != key]
         if len(remaining) != len(self.notifications):
@@ -166,7 +175,9 @@ class StateStore:
                        "wifi_rssi": self.device_wifi_rssi,
                        "screen_sleeping": self.device_screen_sleeping},
             "voice": {"state": self.voice_state, "last_request_local": self.last_voice_local,
-                      "provider": self.voice_provider},
+                      "provider": self.voice_provider, "wake_checks": self.wake_checks,
+                      "wake_detections": self.wake_detections,
+                      "last_wake_local": self.last_wake_local},
             "notifications": {"count": len(self.notifications), "items": self.notifications},
             "gmail": {"connected": self.gmail_snapshot is not None and self.gmail_error is None,
                       "error": self.gmail_error, "snapshot": self.gmail_snapshot},
