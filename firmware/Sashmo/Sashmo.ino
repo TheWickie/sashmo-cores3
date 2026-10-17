@@ -45,6 +45,7 @@ String dateText;
 String errorText;
 bool codexConnected = false;
 bool serverConnected = false;
+bool wakeWordEnabled = false;
 bool dirty = true;
 int batteryLevel = -1;
 bool batteryPresent = false;
@@ -67,6 +68,7 @@ int16_t* wakeTail = nullptr;
 bool wakeMicActive = false;
 bool wakeRecording = false;
 uint32_t wakeRecordingStartedMs = 0;
+void stopWakeListening();
 
 String baseUrl() {
   return String("http://") + kServerHost + ":" + String(kServerPort);
@@ -195,7 +197,7 @@ void drawIdle() {
   M5.Display.setTextColor(0xBDF7, 0x0841);
   M5.Display.setTextSize(1);
   M5.Display.setCursor(116, 229);
-  M5.Display.print(kWakeWordEnabled && (usbPowered || kWakeOnBattery)
+  M5.Display.print(wakeWordEnabled && (usbPowered || kWakeOnBattery)
                      ? "SAY HELLO SASHMO" : "TAP TO SPEAK");
   M5.Display.fillRoundRect(220, 174, 88, 42, 8, 0x18E3);
   M5.Display.setTextColor(0xFFFF, 0x18E3);
@@ -406,6 +408,14 @@ void parsePulse(const String& payload) {
     errorText = "Bad desktop data";
     setState(ScreenState::Error);
     return;
+  }
+  if (doc["wake_word_enabled"].is<bool>()) {
+    const bool enabled = doc["wake_word_enabled"].as<bool>();
+    if (enabled != wakeWordEnabled) {
+      wakeWordEnabled = enabled;
+      dirty = true;
+      if (!enabled) stopWakeListening();
+    }
   }
   const int newVersion = doc["version"] | snapshotVersion;
   const String newTime = String(doc["time"] | "--:--");
@@ -763,6 +773,7 @@ void pushToTalk() {
   for (int turn = 0; turn < 8; ++turn) {
     if (turn > 0) delay(250);  // Let speaker output settle before listening again.
     if (!pushToTalkOnce(turn > 0)) break;
+    if (!wakeWordEnabled) break;
   }
   lastInteractionMs = millis();
   nextPulseMs = millis();
@@ -771,7 +782,7 @@ void pushToTalk() {
 void pollWakeWord(uint32_t now) {
   const bool allowedPower = usbPowered || (kWakeOnBattery &&
                             (batteryLevel < 0 || batteryLevel > kLowBatteryPercent));
-  const bool shouldListen = kWakeWordEnabled && allowedPower && serverConnected
+  const bool shouldListen = wakeWordEnabled && allowedPower && serverConnected
                          && WiFi.status() == WL_CONNECTED
                          && screenState != ScreenState::Listening
                          && screenState != ScreenState::Processing

@@ -354,6 +354,12 @@ class SashmoDesktop(tk.Tk):
         tk.Checkbutton(card, text="Keep the Sashmo backend running after Windows sign-in", variable=self.autostart_var,
                        bg=PANEL, fg=TEXT, selectcolor=PANEL_LIGHT, activebackground=PANEL,
                        activeforeground=TEXT, font=("Segoe UI", 11), anchor="w").pack(anchor="w", padx=20, pady=(22, 12))
+        self.wake_word_var = tk.BooleanVar(value=config.get("wake_word_enabled") is True)
+        tk.Checkbutton(card, text="Wake when I say 'Hello Sashmo'", variable=self.wake_word_var,
+                       bg=PANEL, fg=TEXT, selectcolor=PANEL_LIGHT, activebackground=PANEL,
+                       activeforeground=TEXT, font=("Segoe UI", 11), anchor="w").pack(anchor="w", padx=20, pady=(0, 5))
+        self._label(card, "Off: tap the touchscreen microphone for each request; no automatic follow-up listening.",
+                    9, MUTED).pack(anchor="w", padx=24, pady=(0, 12))
         self._button(card, "Save settings", self._save_settings, True).pack(anchor="w", padx=24, pady=(0, 23))
 
         note = Card(page)
@@ -370,8 +376,9 @@ class SashmoDesktop(tk.Tk):
                     10, MUTED).pack(anchor="w", pady=(18, 4))
         wake_power = "USB and battery" if config.get("wake_on_battery", False) else "USB power only"
         wake_status = wake_power if config.get("wake_word_enabled", False) else "off"
-        self._label(page, f"'Hello Sashmo' wake listening: {wake_status}. Recognition stays on this PC.",
-                    10, MUTED).pack(anchor="w", pady=(0, 4))
+        self.wake_status_label = self._label(page, f"'Hello Sashmo' wake listening: {wake_status}. Recognition stays on this PC.",
+                                             10, MUTED)
+        self.wake_status_label.pack(anchor="w", pady=(0, 4))
         self._label(page, "Device standby and pulse settings are embedded in firmware; changing them requires a rebuild and flash.",
                     10, MUTED).pack(anchor="w")
 
@@ -1169,7 +1176,10 @@ class SashmoDesktop(tk.Tk):
             interval = int(self.poll_var.get())
             if not 30 <= interval <= 3600:
                 raise ValueError("Codex refresh must be between 30 and 3600 seconds")
-            update_config({"codex_poll_seconds": interval})
+            wake_enabled = self.wake_word_var.get()
+            update_config({"codex_poll_seconds": interval, "wake_word_enabled": wake_enabled})
+            wake_power = "USB and battery" if load_config().get("wake_on_battery", False) else "USB power only"
+            self.wake_status_label.configure(text=f"'Hello Sashmo' wake listening: {wake_power if wake_enabled else 'off'}. Recognition stays on this PC.")
             set_autostart(self.autostart_var.get())
             try:
                 managed = bool(send_service_command("status").get("managed"))

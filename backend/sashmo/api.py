@@ -35,6 +35,7 @@ class Config:
     port: int
     device_token: str
     codex_poll_seconds: int = 300
+    wake_word_enabled: bool = False
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -49,7 +50,7 @@ class Config:
         poll = int(data.get("codex_poll_seconds", 300))
         if not 1024 <= port <= 65535 or not 30 <= poll <= 3600:
             raise ValueError("Invalid port or Codex poll interval")
-        return cls(str(host), port, token, poll)
+        return cls(str(host), port, token, poll, data.get("wake_word_enabled") is True)
 
 
 def create_app(config: Config, *, start_worker: bool = True, state: StateStore | None = None,
@@ -114,7 +115,8 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
                     x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
         authenticate(x_sashmo_token)
         store.record_device(battery, charging, usb, wifi_rssi, screen_sleeping)
-        return JSONResponse(store.pulse(since), headers={"Cache-Control": "no-store"})
+        return JSONResponse({**store.pulse(since), "wake_word_enabled": config.wake_word_enabled},
+                            headers={"Cache-Control": "no-store"})
 
     @app.get("/v1/status")
     async def status(request: Request, x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
@@ -238,6 +240,8 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
     @app.post("/v1/wake")
     async def wake(request: Request, x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
         authenticate(x_sashmo_token)
+        if not config.wake_word_enabled:
+            return JSONResponse({"wake": False}, headers={"Cache-Control": "no-store"})
         content_length = request.headers.get("content-length")
         if content_length and int(content_length) > 100_000:
             raise HTTPException(status_code=413, detail="Audio too large")
