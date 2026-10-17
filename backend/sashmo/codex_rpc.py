@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+from pathlib import Path
 import shutil
 from typing import Any
 
@@ -12,9 +14,25 @@ class CodexRpcError(RuntimeError):
     pass
 
 
+def _codex_executable() -> str:
+    found = shutil.which("codex")
+    if found:
+        return found
+    # The Windows desktop app installs its CLI in a versioned directory that
+    # may be absent from the PATH inherited by an autostarted service.
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        folder = Path(local) / "OpenAI" / "Codex" / "bin"
+        candidates = (path for path in folder.glob("*/codex.exe") if path.is_file())
+        latest = max(candidates, key=lambda path: path.stat().st_mtime, default=None)
+        if latest:
+            return str(latest)
+    return "codex"
+
+
 class CodexAppServer:
     def __init__(self, executable: str | None = None) -> None:
-        self.executable = executable or shutil.which("codex") or "codex"
+        self.executable = executable or _codex_executable()
         self.process: asyncio.subprocess.Process | None = None
         self.updated = asyncio.Event()
         self._reader_task: asyncio.Task[None] | None = None
