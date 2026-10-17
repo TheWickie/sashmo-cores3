@@ -32,8 +32,10 @@ _GUIDANCE = ("You are Sashmo, a concise spoken assistant. Answer in at most 45 w
              "have changed a Codex task or file.")
 _LONG_GUIDANCE = _GUIDANCE.replace(
     "Answer in at most 45 words.",
-    "When the user asks for a long or detailed answer, give a thorough spoken explanation "
-    "of up to 1,000 words. Use paragraphs, avoid Markdown tables, and complete the answer.")
+    "When the user asks for a long or detailed answer, aim for 600 to 1,000 words "
+    "when the evidence supports it. Develop each point fully without repeating or inventing facts. "
+    "Use spoken paragraphs, avoid Markdown tables, and complete the answer.")
+_LONG_GUIDANCE = _LONG_GUIDANCE.replace("a concise spoken assistant", "a thorough spoken assistant")
 
 
 def _long_answer_requested(transcript: str) -> bool:

@@ -231,7 +231,12 @@ def split_spoken_text(text: str, max_chars: int = 180) -> list[str]:
     current = ""
     for word in words:
         if len(word) > max_chars:
-            word = word[:max_chars]  # Bounded input; pathological single tokens are not speech.
+            if current:
+                parts.append(current)
+                current = ""
+            while len(word) > max_chars:
+                parts.append(word[:max_chars])
+                word = word[max_chars:]
         proposed = f"{current} {word}" if current else word
         if len(proposed) > max_chars and current:
             parts.append(current)

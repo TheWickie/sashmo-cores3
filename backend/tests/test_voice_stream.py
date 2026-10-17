@@ -10,6 +10,8 @@ def test_split_spoken_text_preserves_long_answer():
     assert len(parts) > 4
     assert " ".join(parts) == answer.strip()
     assert all(len(part) <= 180 for part in parts)
+    long_word = "x" * 500
+    assert "".join(split_spoken_text(long_word)) == long_word
 
 
 def test_stream_releases_each_segment_and_expires_after_final():

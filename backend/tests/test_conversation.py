@@ -57,7 +57,7 @@ def test_explicit_detailed_answer_is_saved_without_short_reply_cap(tmp_path):
     answer = asyncio.run(provider.respond("Give me a detailed explanation of the design", None, True))
     assert len(answer) > 1000
     assert provider.long_reply is True
-    assert "1,000 words" in client.requests[-1][2][0]["content"]
+    assert "600 to 1,000 words" in client.requests[-1][2][0]["content"]
     restarted = ConversationProvider(tmp_path / "projects.local.json", client=client)
     assert restarted.turns[-1]["content"] == answer
 
