@@ -97,6 +97,27 @@ def test_text_provider_can_be_replaced_without_changing_speech_transport(monkeyp
     )
 
 
+def test_private_reply_uses_cedar_path_instead_of_windows_voice(monkeypatch):
+    async def fake_transcribe(_audio):
+        return "Discuss my task", 1.0
+
+    async def cedar(answer):
+        assert answer == "A private task summary"
+        return b"cedar"
+
+    class Provider:
+        sensitive_output = True
+
+        async def respond(self, *_args):
+            return "A private task summary"
+
+    monkeypatch.setattr(speech, "transcribe", fake_transcribe)
+    monkeypatch.setattr(speech, "synthesize_reply", cedar)
+    monkeypatch.setattr(speech, "synthesize", lambda _: (_ for _ in ()).throw(
+        AssertionError("Windows speech must not be selected")))
+    assert asyncio.run(speech.process_audio(b"test", None, True, Provider()))[2] == b"cedar"
+
+
 def test_silent_follow_up_ends_without_speech_synthesis(monkeypatch):
     async def no_speech(_audio):
         return None, 0.0

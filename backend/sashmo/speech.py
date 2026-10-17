@@ -159,27 +159,30 @@ def normalize_reply_wav(data: bytes) -> bytes:
 
 
 async def synthesize_reply(text: str) -> bytes:
-    if API_KEY_FILE.is_file():
-        key = API_KEY_FILE.read_text(encoding="utf-8-sig").strip()
-        if key:
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.post(
-                        SPEECH_URL,
-                        headers={"Authorization": f"Bearer {key}"},
-                        json={
-                            "model": SPEECH_MODEL,
-                            "voice": SPEECH_VOICE,
-                            "input": text,
-                            "instructions": "Speak in a calm, warm, reassuring tone. Be clear and natural.",
-                            "response_format": "wav",
-                        },
-                    )
-                response.raise_for_status()
-                return normalize_reply_wav(response.content)
-            except (httpx.HTTPError, ValueError):
-                LOG.warning("Cloud speech output unavailable; using local voice")
-    return await asyncio.to_thread(synthesize, text)
+    key = API_KEY_FILE.read_text(encoding="utf-8-sig").strip() if API_KEY_FILE.is_file() else ""
+    if not key:
+        raise RuntimeError("Cedar speech is not configured")
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    SPEECH_URL,
+                    headers={"Authorization": f"Bearer {key}"},
+                    json={
+                        "model": SPEECH_MODEL,
+                        "voice": SPEECH_VOICE,
+                        "input": text,
+                        "instructions": "Speak in a calm, warm, reassuring tone. Be clear and natural.",
+                        "response_format": "wav",
+                    },
+                )
+            response.raise_for_status()
+            return normalize_reply_wav(response.content)
+        except (httpx.HTTPError, ValueError):
+            if attempt == 0:
+                await asyncio.sleep(0.5)
+    LOG.warning("Cedar speech output unavailable after retry")
+    raise RuntimeError("Cedar speech output unavailable")
 
 
 async def process_audio(data: bytes, quota: dict[str, Any] | None, connected: bool,
@@ -192,9 +195,7 @@ async def process_audio(data: bytes, quota: dict[str, Any] | None, connected: bo
         answer = "Sorry, I didn't catch that. Please tap the microphone and try again."
     else:
         answer = await (provider or ReadOnlyCommandProvider()).respond(transcript, quota, connected)
-    audio = (await asyncio.to_thread(synthesize, answer)
-             if provider and getattr(provider, "sensitive_output", False)
-             else await synthesize_reply(answer))
+    audio = await synthesize_reply(answer)
     return transcript or "", answer, audio
 
 

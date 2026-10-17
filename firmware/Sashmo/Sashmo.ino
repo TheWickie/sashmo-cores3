@@ -589,8 +589,9 @@ bool pushToTalkOnce(bool followUp) {
   HTTPClient http;
   http.begin(baseUrl() + "/v1/voice");
   http.setTimeout(60000);
-  const char* responseHeaders[] = {"X-Sashmo-Volume-Percent", "X-Sashmo-Memory"};
-  http.collectHeaders(responseHeaders, 2);
+  const char* responseHeaders[] = {"X-Sashmo-Volume-Percent", "X-Sashmo-Memory",
+                                   "X-Sashmo-Error"};
+  http.collectHeaders(responseHeaders, 3);
   http.addHeader("X-Sashmo-Token", kDeviceToken);
   http.addHeader("Content-Type", "audio/wav");
   if (!conversationMemory.isEmpty()) http.addHeader("X-Sashmo-Memory", conversationMemory);
@@ -604,8 +605,9 @@ bool pushToTalkOnce(bool followUp) {
   }
   if (status != 200) {
     Serial.printf("VOICE failed http=%d\n", status);
+    const String replyError = http.header("X-Sashmo-Error");
     http.end();
-    failVoice("Voice service error");
+    failVoice(replyError.isEmpty() ? "Voice service error" : replyError.c_str());
     return false;
   }
 

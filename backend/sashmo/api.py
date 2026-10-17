@@ -171,7 +171,11 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
                                                              provider=voice_provider,
                                                              silent_on_no_speech=follow_up)
             store.voice_provider = voice_provider.last_source if voice_provider else "local"
-        except Exception:
+        except Exception as exc:
+            if isinstance(exc, RuntimeError) and str(exc).startswith("Cedar speech"):
+                LOG.warning("Cedar speech unavailable")
+                raise HTTPException(status_code=503, detail="Cedar speech unavailable",
+                                    headers={"X-Sashmo-Error": "Cedar unavailable"}) from None
             LOG.exception("Voice processing failed")
             raise HTTPException(status_code=503, detail="Speech processing unavailable") from None
         finally:
