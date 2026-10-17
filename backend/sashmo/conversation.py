@@ -50,7 +50,10 @@ class ConversationProvider:
     @staticmethod
     def _local_command(transcript: str, quota: dict[str, Any] | None, connected: bool) -> str | None:
         words = transcript.casefold()
-        if re.search(r"\b(quota|allowance|reset|time|date|today|connection|connected)\b", words):
+        if (re.search(r"\b(quota|allowance|reset)\b", words)
+                or re.search(r"\b(what time|current time|time is it|tell me the time)\b", words)
+                or re.search(r"\b(what date|today'?s date|what day is it)\b", words)
+                or re.search(r"\b(connection status|are you connected|is codex connected|desktop connected)\b", words)):
             return answer_command(transcript, quota, connected)
         return None
 

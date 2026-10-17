@@ -458,17 +458,17 @@ void stopWakeListening() {
   wakeRecording = false;
 }
 
-void pushToTalk() {
+bool pushToTalkOnce(bool followUp) {
   stopWakeListening();
   if (WiFi.status() != WL_CONNECTED || !serverConnected) {
     failVoice("Desktop offline");
-    return;
+    return false;
   }
 
   const size_t wavBytes = kWavHeaderBytes + kRecordSamples * sizeof(int16_t);
   uint8_t* wav = static_cast<uint8_t*>(heap_caps_malloc(wavBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (!wav) wav = static_cast<uint8_t*>(malloc(wavBytes));
-  if (!wav) { failVoice("No audio memory"); return; }
+  if (!wav) { failVoice("No audio memory"); return false; }
 
   M5.Speaker.end();
   setState(ScreenState::Listening);
@@ -479,22 +479,43 @@ void pushToTalk() {
     M5.Mic.end();
     free(wav);
     failVoice("Microphone failed");
-    return;
+    return false;
   }
   const uint32_t deadline = millis() + 8000;
-  while (M5.Mic.isRecording() && static_cast<int32_t>(deadline - millis()) > 0) delay(10);
+  while (M5.Mic.isRecording() && static_cast<int32_t>(deadline - millis()) > 0) {
+    M5.update();
+    delay(10);
+  }
   const bool complete = M5.Mic.isRecording() == 0;
   M5.Mic.end();
   if (!complete) {
     free(wav);
     failVoice("Mic timeout");
-    return;
+    return false;
   }
 
   int peak = 0;
   const int16_t* samples = reinterpret_cast<int16_t*>(wav + kWavHeaderBytes);
   for (size_t i = 0; i < kRecordSamples; ++i) peak = max(peak, abs(static_cast<int>(samples[i])));
   Serial.printf("MIC captured samples=%u peak=%d\n", static_cast<unsigned>(kRecordSamples), peak);
+  if (followUp) {
+    int activeBlocks = 0;
+    for (size_t offset = 0; offset < kRecordSamples; offset += 1600) {
+      uint32_t magnitude = 0;
+      int blockPeak = 0;
+      for (size_t i = offset; i < offset + 1600; ++i) {
+        const int sample = abs(static_cast<int>(samples[i]));
+        magnitude += sample;
+        blockPeak = max(blockPeak, sample);
+      }
+      if (blockPeak >= 200 && magnitude / 1600 >= 30) ++activeBlocks;
+    }
+    if (activeBlocks < 2) {
+      free(wav);
+      setState(ScreenState::Idle);
+      return false;
+    }
+  }
   makeWavHeader(wav, kRecordSamples);
   setState(ScreenState::Processing);
   render();
@@ -504,24 +525,30 @@ void pushToTalk() {
   http.setTimeout(30000);
   http.addHeader("X-Sashmo-Token", kDeviceToken);
   http.addHeader("Content-Type", "audio/wav");
+  if (followUp) http.addHeader("X-Sashmo-Follow-Up", "1");
   const int status = http.POST(wav, wavBytes);
   free(wav);
+  if (followUp && status == 204) {
+    http.end();
+    setState(ScreenState::Idle);
+    return false;
+  }
   if (status != 200) {
     Serial.printf("VOICE failed http=%d\n", status);
     http.end();
     failVoice("Voice service error");
-    return;
+    return false;
   }
 
   const int replySize = http.getSize();
   if (replySize < 44 || replySize > static_cast<int>(kMaxReplyBytes)) {
     http.end();
     failVoice("Reply too large");
-    return;
+    return false;
   }
   uint8_t* reply = static_cast<uint8_t*>(heap_caps_malloc(replySize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (!reply) reply = static_cast<uint8_t*>(malloc(replySize));
-  if (!reply) { http.end(); failVoice("No reply memory"); return; }
+  if (!reply) { http.end(); failVoice("No reply memory"); return false; }
   WiFiClient* stream = http.getStreamPtr();
   size_t received = 0;
   const uint32_t readDeadline = millis() + 30000;
@@ -539,7 +566,7 @@ void pushToTalk() {
   if (received != static_cast<size_t>(replySize)) {
     free(reply);
     failVoice("Reply timeout");
-    return;
+    return false;
   }
 
   setState(ScreenState::Speaking);
@@ -548,13 +575,26 @@ void pushToTalk() {
   if (!M5.Speaker.begin() || !M5.Speaker.playWav(reply, replySize, 1, 0, true)) {
     free(reply);
     failVoice("Speaker failed");
-    return;
+    return false;
   }
   Serial.printf("SPEAKER playing bytes=%d\n", replySize);
-  while (M5.Speaker.isPlaying()) delay(10);
+  while (M5.Speaker.isPlaying()) {
+    M5.update();
+    delay(10);
+  }
   M5.Speaker.end();
   free(reply);
   setState(ScreenState::Idle);
+  nextPulseMs = millis();
+  return true;
+}
+
+void pushToTalk() {
+  for (int turn = 0; turn < 8; ++turn) {
+    if (turn > 0) delay(250);  // Let speaker output settle before listening again.
+    if (!pushToTalkOnce(turn > 0)) break;
+  }
+  lastInteractionMs = millis();
   nextPulseMs = millis();
 }
 
@@ -709,7 +749,9 @@ void loop() {
       if (displaySleeping) {
         wakeDisplay(now);
         render();
-        return;  // The waking tap must not also activate a control.
+        if (screenState == ScreenState::Idle && touch.y >= 160
+            && touch.x >= 115 && touch.x <= 205) pushToTalk();
+        return;
       }
       lastInteractionMs = now;
       applyPowerProfile();

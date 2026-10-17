@@ -28,6 +28,31 @@ def test_voice_rejects_non_wav():
         assert response.status_code == 400
 
 
+def test_silent_follow_up_returns_no_audio(monkeypatch):
+    import sashmo.api as api_module
+    options = []
+
+    async def silent_audio(*args, **kwargs):
+        options.append(kwargs.get("silent_on_no_speech"))
+        return "", "", b""
+
+    monkeypatch.setattr(api_module, "process_audio", silent_audio)
+    payload = io.BytesIO()
+    with wave.open(payload, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(16000)
+        writer.writeframes(b"\0\0" * 16000)
+    app = create_app(Config("192.168.1.10", 8765, "x" * 32), start_worker=False)
+    with TestClient(app) as client:
+        response = client.post("/v1/voice", headers={"X-Sashmo-Token": "x" * 32,
+                                                    "X-Sashmo-Follow-Up": "1"},
+                               content=payload.getvalue())
+    assert response.status_code == 204
+    assert response.content == b""
+    assert options == [True]
+
+
 def test_wake_audio_is_authenticated_bounded_and_local(monkeypatch):
     import sashmo.api as api_module
     recognized = []

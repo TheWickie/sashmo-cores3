@@ -163,9 +163,11 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         store.voice_state = "processing"
+        follow_up = request.headers.get("X-Sashmo-Follow-Up") == "1"
         try:
             transcript, answer, output = await process_audio(audio, store.quota, store.codex_connected,
-                                                             provider=voice_provider)
+                                                             provider=voice_provider,
+                                                             silent_on_no_speech=follow_up)
             store.voice_provider = voice_provider.last_source if voice_provider else "local"
         except Exception:
             LOG.exception("Voice processing failed")
@@ -174,6 +176,8 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
             store.voice_state = "idle"
             store.last_voice_local = datetime.now().astimezone().isoformat(timespec="seconds")
         LOG.info("Voice request completed (recognized=%s, response_bytes=%d)", bool(transcript), len(output))
+        if follow_up and not transcript:
+            return Response(status_code=204, headers={"Cache-Control": "no-store"})
         return Response(
             output,
             media_type="audio/wav",

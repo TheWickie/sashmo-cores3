@@ -6,6 +6,7 @@ import asyncio
 import io
 import json
 import logging
+import re
 import subprocess
 import tempfile
 import wave
@@ -170,9 +171,12 @@ async def synthesize_reply(text: str) -> bytes:
 
 
 async def process_audio(data: bytes, quota: dict[str, Any] | None, connected: bool,
-                        provider: TextResponseProvider | None = None) -> tuple[str, str, bytes]:
+                        provider: TextResponseProvider | None = None,
+                        silent_on_no_speech: bool = False) -> tuple[str, str, bytes]:
     transcript, confidence = await transcribe(data)
     if not transcript or confidence < 0.45:
+        if silent_on_no_speech:
+            return "", "", b""
         answer = "Sorry, I didn't catch that. Please tap the microphone and try again."
     else:
         answer = await (provider or ReadOnlyCommandProvider()).respond(transcript, quota, connected)
@@ -221,9 +225,9 @@ def answer_command(transcript: str, quota: dict[str, Any] | None, connected: boo
             f"Your {_label(w)} quota resets on {datetime.fromisoformat(w['resets_at_local']).strftime('%A %d %B at %I:%M %p')}"
             for w in resets
         ) + "."
-    if "time" in utterance:
+    if re.search(r"\b(what time|current time|time is it|tell me the time)\b", utterance):
         return f"The time is {now.strftime('%I:%M %p')}."
-    if "date" in utterance or "today" in utterance:
+    if re.search(r"\b(what date|today'?s date|what day is it)\b", utterance):
         return f"Today is {now.strftime('%A %d %B %Y')}."
     if "connection" in utterance or "connected" in utterance:
         return "The desktop is connected to Codex." if connected else "The desktop is not currently connected to Codex."

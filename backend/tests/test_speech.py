@@ -61,3 +61,16 @@ def test_text_provider_can_be_replaced_without_changing_speech_transport(monkeyp
     assert asyncio.run(speech.process_audio(b"test", QUOTA, True, Provider())) == (
         "hello", "Received hello", b"Received hello"
     )
+
+
+def test_silent_follow_up_ends_without_speech_synthesis(monkeypatch):
+    async def no_speech(_audio):
+        return None, 0.0
+
+    async def synthesize_must_not_run(_answer):
+        raise AssertionError("silent follow-up must not synthesize")
+
+    monkeypatch.setattr(speech, "transcribe", no_speech)
+    monkeypatch.setattr(speech, "synthesize_reply", synthesize_must_not_run)
+    assert asyncio.run(speech.process_audio(b"test", QUOTA, True,
+                                            silent_on_no_speech=True)) == ("", "", b"")

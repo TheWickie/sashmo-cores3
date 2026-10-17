@@ -46,6 +46,15 @@ def test_plan_conversation_keeps_bounded_context_without_actions(tmp_path):
     assert "no tools" in messages[0]["content"].lower()
 
 
+def test_time_word_in_general_question_does_not_hijack_plan_conversation(tmp_path):
+    client = FakePlanClient()
+    provider = ConversationProvider(tmp_path / "projects.local.json", client=client)
+    reply = asyncio.run(provider.respond("What do you think of time travel?", None, True))
+    assert reply == "A short spoken reply."
+    assert provider.last_source == "chatgpt_plan"
+    assert len(client.requests) == 1
+
+
 def test_mail_answers_use_cached_metadata_and_local_voice_only(tmp_path):
     class State:
         gmail_snapshot = {"unread_count": 3, "messages": [
