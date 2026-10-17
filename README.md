@@ -6,7 +6,7 @@ Sashmo is an open-source voice and status companion for the M5Stack CoreS3 and a
 
 The Labrador illustration in `assets/sashmo-labrador.png` is the project mascot. A small JPEG version appears briefly when the CoreS3 starts.
 
-This is an active hardware project. Push-to-talk, quota display, battery telemetry and the dashboard work. Optional ChatGPT plan conversation is prepared but awaits account sign-in and live verification. Gmail metadata and Calendar upcoming-event connections are prepared but await Google consent and live verification. See [Phase 2 status](docs/PHASE2.md) for verified behaviour and release blockers.
+This is an active hardware project. Push-to-talk, quota display, battery telemetry and the dashboard work. A local ChatGPT plan sign-in and one text response succeeded; CoreS3 follow-up conversation still needs a physical test. Gmail metadata and Calendar upcoming-event connections have completed live read-only requests. See [Phase 2 status](docs/PHASE2.md) for verified behaviour and release blockers.
 
 ## Easy mode: set up with Codex
 
@@ -47,11 +47,11 @@ arduino-cli --config-file arduino-cli.yaml lib install ArduinoJson@7.4.3 M5GFX@0
 
 ## Private setup
 
-Create `config.local.json` by running `python backend/setup_config.py --host <YOUR_PC_PRIVATE_IP>`. The script asks for the Wi-Fi network name without echoing it. Put the Wi-Fi password as one line in `wifipassword.txt` at the repository root. These files are ignored by Git. `config.example.json` shows the available settings; edit your private config to adjust the service port, pulse intervals and display brightness.
+Create `config.local.json` by running `python backend/setup_config.py --host <YOUR_PC_PRIVATE_IP>`. The script asks for the Wi-Fi network name without echoing it. Put the Wi-Fi password as one line in `wifipassword.txt` at the repository root. These files are ignored by Git. `config.example.json` shows the available settings; edit your private config to adjust the service port, pulse intervals, display brightness and `screen_standby_after_seconds`. The display enters standby after five minutes of inactivity by default, on USB or battery. Wi-Fi keeps running; the first tap wakes the display without activating a control. Changing this setting requires reflashing the device.
 
 To use OpenAI transcription and Cedar speech, optionally put an OpenAI API key as one line in `openAIAPIKey.txt`. These audio API calls may incur charges. Without a key, Sashmo uses installed Windows speech fallbacks. Conversational inference is not enabled and is never silently routed to a separately billed API.
 
-For optional natural conversation, open the dashboard's ChatGPT page, choose **Continue with ChatGPT**, complete the system-browser consent, then choose a model listed for that account and select **Use selected model**. This uses a separate local OAuth registration and ChatGPT plan permission. It does not reuse the Codex login or the speech API key. The live account flow has not yet been verified; eligibility and available models depend on the account. If sign-in or plan use fails, Sashmo keeps local read-only voice commands and never uses billed text API inference as a fallback.
+For optional natural conversation, open the dashboard's ChatGPT page, choose **Continue with ChatGPT**, complete the system-browser consent, then choose a model listed for that account and select **Use selected model**. This uses a separate local OAuth registration and ChatGPT plan permission. It does not reuse the Codex login or the speech API key. A private integration test completed sign-in and one text reply; eligibility and available models depend on each account. If sign-in or plan use fails, Sashmo keeps local read-only voice commands and never uses billed text API inference as a fallback. The Projects page also has **Discussion notes**: you can write a brief overview for an approved project. Only those notes and bounded Git status are supplied to the selected ChatGPT model when you name that project in a conversational question. Leaving the notes blank keeps the project status-only. Sashmo does not automatically read project files for conversation.
 
 The service binds only to the private IPv4 address configured in `config.local.json`, and every device request carries a random device token. The current LAN link uses HTTP, so use it only on a trusted local network; do not forward the service port to the internet. The OpenAI key and Codex sign-in stay on the PC. The CoreS3 firmware contains only its Wi-Fi credentials and device token.
 

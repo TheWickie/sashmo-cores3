@@ -7,7 +7,9 @@ Example::
      "projects": [{"id": "example", "name": "Example", "path": "D:/Development/example"}]}
 
 Callers may display the returned summaries; paths and Git error output are never
-included in them. This module never reads project file contents.
+included in them. Optional user-written briefings are kept in the private
+registry and are returned only by ``discussion_context``. This module never
+reads project file contents.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from typing import Any
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _MAX_PROJECTS = 32
+_MAX_BRIEFING = 1500
 
 
 class RegistryError(ValueError):
@@ -102,11 +105,16 @@ class ProjectRegistry:
             if (not isinstance(name, str) or not (1 <= len(name.strip()) <= 80)
                     or any(ord(char) < 32 for char in name)):
                 raise RegistryError("invalid_config")
+            briefing = project.get("briefing", "")
+            if (not isinstance(briefing, str) or len(briefing) > _MAX_BRIEFING
+                    or any(ord(char) < 32 and char not in "\n\t" for char in briefing)):
+                raise RegistryError("invalid_config")
             seen.add(project_id)
             path = _absolute_path(project.get("path"))
             if not any(_under(path, root) for root in roots):
                 raise RegistryError("path_not_allowed")
-            validated.append({"id": project_id, "name": name.strip(), "path": path})
+            validated.append({"id": project_id, "name": name.strip(), "path": path,
+                              "briefing": briefing.strip()})
         return validated
 
     def list_projects(self) -> dict[str, Any]:
@@ -126,6 +134,32 @@ class ProjectRegistry:
         for project in projects:
             if project["id"] == project_id:
                 return self._summary(project)
+        return None
+
+    def discussion_context(self, utterance: str) -> dict[str, str] | None:
+        """Find an explicitly named project with a user-authored briefing.
+
+        The returned data is bounded and contains no path or source content.
+        A project with no briefing remains status-only.
+        """
+        try:
+            projects = self._load()
+        except RegistryError:
+            return None
+        words = utterance.casefold()
+        for project in projects:
+            name = project["name"]
+            project_id = project["id"]
+            mentioned = (re.search(r"(?<!\w)" + re.escape(name.casefold()) + r"(?!\w)", words)
+                         or re.search(r"(?<!\w)" + re.escape(project_id) + r"(?!\w)", words))
+            if mentioned and project["briefing"]:
+                summary = self._summary(project)
+                if summary["state"] != "ok":
+                    return None
+                return {"name": name, "briefing": project["briefing"],
+                        "branch": summary["branch"] or "unknown",
+                        "working_tree": "uncommitted changes" if summary["dirty"] else "clean",
+                        "last_commit": summary["last_commit"] or "none"}
         return None
 
     @staticmethod

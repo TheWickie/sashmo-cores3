@@ -50,6 +50,7 @@ uint32_t retryMs = 5000;
 bool wifiWasConnected = false;
 uint32_t lastInteractionMs = 0;
 uint8_t appliedBrightness = 0;
+bool displaySleeping = false;
 
 String baseUrl() {
   return String("http://") + kServerHost + ":" + String(kServerPort);
@@ -233,7 +234,7 @@ void drawActivity(const char* title, const char* subtitle, uint16_t color) {
 }
 
 void render() {
-  if (!dirty) return;
+  if (!dirty || displaySleeping) return;
   dirty = false;
   switch (screenState) {
     case ScreenState::Idle: drawIdle(); break;
@@ -278,6 +279,7 @@ void readPower() {
 }
 
 void applyPowerProfile() {
+  if (displaySleeping) return;
   uint8_t target = kUsbBrightness;
   if (!usbPowered) {
     if (batteryLevel >= 0 && batteryLevel <= kLowBatteryPercent) {
@@ -292,6 +294,28 @@ void applyPowerProfile() {
     M5.Display.setBrightness(target);
     appliedBrightness = target;
   }
+}
+
+void updateDisplayStandby(uint32_t now) {
+  const bool activeVoice = screenState == ScreenState::Listening
+                        || screenState == ScreenState::Processing
+                        || screenState == ScreenState::Speaking;
+  if (!displaySleeping && !activeVoice
+      && now - lastInteractionMs >= kScreenStandbyAfterSeconds * 1000UL) {
+    M5.Display.sleep();
+    displaySleeping = true;
+    dirty = true;
+    Serial.println("DISPLAY standby");
+  }
+}
+
+void wakeDisplay(uint32_t now) {
+  M5.Display.wakeup();
+  displaySleeping = false;
+  lastInteractionMs = now;
+  dirty = true;
+  applyPowerProfile();
+  Serial.println("DISPLAY awake");
 }
 
 uint32_t pulseIntervalMs() {
@@ -576,6 +600,11 @@ void loop() {
   if (M5.Touch.getCount()) {
     const auto touch = M5.Touch.getDetail(0);
     if (touch.wasClicked()) {
+      if (displaySleeping) {
+        wakeDisplay(now);
+        render();
+        return;  // The waking tap must not also activate a control.
+      }
       lastInteractionMs = now;
       applyPowerProfile();
       Serial.printf("TOUCH x=%d y=%d\n", touch.x, touch.y);
@@ -590,6 +619,8 @@ void loop() {
       }
     }
   }
+  updateDisplayStandby(now);
+  applyPowerProfile();
   render();
   delay(20);
 }

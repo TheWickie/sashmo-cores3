@@ -365,6 +365,7 @@ class SashmoDesktop(tk.Tk):
         row.pack(fill="x", pady=(0, 14))
         self._button(row, "Add Git project", self._add_project, True).pack(side="left")
         self._button(row, "Refresh", self._refresh_projects).pack(side="left", padx=10)
+        self._button(row, "Discussion notes", self._edit_project_briefing).pack(side="left")
         self.projects_note = self._label(page, "Loading approved projects…", 11, MUTED)
         self.projects_note.pack(anchor="w", pady=(0, 12))
         self.projects_view = tk.Text(page, bg=PANEL, fg=TEXT, insertbackground=TEXT, relief="flat",
@@ -778,6 +779,70 @@ class SashmoDesktop(tk.Tk):
             self._refresh_projects()
         except (OSError, ValueError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
             messagebox.showerror("Sashmo projects", f"Could not add project: {exc}", parent=self)
+
+    def _edit_project_briefing(self) -> None:
+        """Let the user explicitly choose what a ChatGPT plan conversation may see."""
+        try:
+            data = json.loads(PROJECTS_FILE.read_text(encoding="utf-8"))
+            projects = data.get("projects") or []
+            if not isinstance(projects, list) or not projects:
+                raise ValueError("Add a Git project first")
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            messagebox.showerror("Sashmo projects", str(exc), parent=self)
+            return
+
+        dialog = tk.Toplevel(self)
+        dialog.title("Project discussion notes")
+        dialog.configure(bg=BG)
+        dialog.geometry("620x410")
+        dialog.transient(self)
+        dialog.grab_set()
+        frame = tk.Frame(dialog, bg=BG)
+        frame.pack(fill="both", expand=True, padx=22, pady=20)
+        self._label(frame, "Choose a project", 12, TEXT, "bold").pack(anchor="w")
+        choices = {f"{item['name']} · {item['id']}": item for item in projects}
+        chosen = tk.StringVar(value=next(iter(choices)))
+        selector = ttk.Combobox(frame, textvariable=chosen, values=list(choices), state="readonly", width=58)
+        selector.pack(anchor="w", pady=(8, 14))
+        self._label(frame, "Write a short overview of the work you want to discuss.", 10, TEXT).pack(anchor="w")
+        self._label(frame, "Only these notes and current Git status go to your selected ChatGPT model "
+                    "when you name this project. Leave blank to keep it status-only. Do not enter secrets.",
+                    10, MUTED, wraplength=560, justify="left").pack(anchor="w", pady=(4, 10))
+        notes = tk.Text(frame, bg=PANEL, fg=TEXT, insertbackground=TEXT, relief="flat",
+                        font=("Segoe UI", 11), wrap="word", height=8, padx=12, pady=10)
+        notes.pack(fill="both", expand=True)
+
+        def load_notes(_event=None) -> None:
+            notes.delete("1.0", "end")
+            notes.insert("1.0", choices[chosen.get()].get("briefing", ""))
+
+        def save_notes() -> None:
+            value = notes.get("1.0", "end-1c").strip()
+            if len(value) > 1500 or any(ord(char) < 32 and char not in "\n\t" for char in value):
+                messagebox.showerror("Sashmo projects", "Use at most 1,500 characters of plain text.",
+                                     parent=dialog)
+                return
+            selected = choices[chosen.get()]
+            selected["briefing"] = value
+            temp_dir = ROOT / "work"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            fd, temp_name = tempfile.mkstemp(prefix="sashmo-projects-", suffix=".tmp", dir=temp_dir)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                    json.dump(data, stream, indent=2)
+                    stream.write("\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temp_name, PROJECTS_FILE)
+            finally:
+                if os.path.exists(temp_name):
+                    os.unlink(temp_name)
+            dialog.destroy()
+            self._refresh_projects()
+
+        selector.bind("<<ComboboxSelected>>", load_notes)
+        load_notes()
+        self._button(frame, "Save discussion notes", save_notes, True).pack(anchor="e", pady=(14, 0))
 
     def _build_diagnostics(self) -> None:
         page = self._page("diagnostics")

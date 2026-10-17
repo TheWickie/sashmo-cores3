@@ -32,6 +32,7 @@ def main() -> None:
         "battery_idle_brightness": 75,
         "low_battery_brightness": 45,
         "battery_dim_after_seconds": 45,
+        "screen_standby_after_seconds": 300,
         "low_battery_percent": 15,
     }
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

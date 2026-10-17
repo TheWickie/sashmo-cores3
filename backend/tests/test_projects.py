@@ -77,3 +77,25 @@ def test_empty_repository_is_valid(tmp_path: Path) -> None:
     summary = registry.get_project("empty")
     assert summary["state"] == "ok"
     assert summary["last_commit"] is None
+
+
+def test_discussion_context_uses_only_explicit_notes_and_git_status(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "README.md").write_text("Source content must stay local", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial")
+    config = _config(tmp_path, [tmp_path], [{"id": "sample", "name": "Sample", "path": str(repo)}])
+    registry = ProjectRegistry(config)
+    assert registry.discussion_context("How is Sample going?") is None
+
+    data = json.loads(config.read_text(encoding="utf-8"))
+    data["projects"][0]["briefing"] = "A small scheduling tool. Next: improve reminders."
+    config.write_text(json.dumps(data), encoding="utf-8")
+    context = registry.discussion_context("How is Sample going?")
+    assert context is not None
+    assert context["briefing"] == "A small scheduling tool. Next: improve reminders."
+    assert "Source content must stay local" not in json.dumps(context)
+    assert str(repo) not in json.dumps(context)
+    assert registry.discussion_context("What about another project?") is None

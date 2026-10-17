@@ -403,9 +403,9 @@ class SIWCClient:
         models = self.list_models(key)
         if model not in {item["slug"] for item in models}:
             raise SIWCError("Select a model available to this ChatGPT account")
-        if not messages or any(item.get("role") not in {"user", "assistant"}
+        if not messages or any(item.get("role") not in {"developer", "user", "assistant"}
                                or not isinstance(item.get("content"), str) for item in messages):
-            raise SIWCError("Conversation history must contain user and assistant text")
+            raise SIWCError("Conversation history must contain supported text messages")
         token = self._access_token(key)
         request = {"model": model, "input": messages, "store": False, "stream": True}
         chunks: list[str] = []

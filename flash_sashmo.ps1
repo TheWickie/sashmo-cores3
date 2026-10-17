@@ -57,6 +57,8 @@ foreach ($brightness in @($usbBrightness, $batteryBrightness, $batteryIdleBright
 }
 $batteryDimAfter = if ($null -eq $localConfig.battery_dim_after_seconds) { 45 } else { [int]$localConfig.battery_dim_after_seconds }
 if ($batteryDimAfter -lt 1 -or $batteryDimAfter -gt 3600) { throw 'Battery dim delay must be 1 through 3600 seconds.' }
+$screenStandbyAfter = if ($null -eq $localConfig.screen_standby_after_seconds) { 300 } else { [int]$localConfig.screen_standby_after_seconds }
+if ($screenStandbyAfter -lt 60 -or $screenStandbyAfter -gt 3600) { throw 'Display standby delay must be 60 through 3600 seconds.' }
 $lowBatteryPercent = if ($null -eq $localConfig.low_battery_percent) { 15 } else { [int]$localConfig.low_battery_percent }
 if ($lowBatteryPercent -lt 1 -or $lowBatteryPercent -gt 50) { throw 'Low-battery threshold must be 1 through 50 percent.' }
 
@@ -75,6 +77,7 @@ $lines = @(
     ('constexpr uint8_t kBatteryIdleBrightness = {0};' -f $batteryIdleBrightness)
     ('constexpr uint8_t kLowBatteryBrightness = {0};' -f $lowBatteryBrightness)
     ('constexpr uint32_t kBatteryDimAfterSeconds = {0};' -f $batteryDimAfter)
+    ('constexpr uint32_t kScreenStandbyAfterSeconds = {0};' -f $screenStandbyAfter)
     ('constexpr int kLowBatteryPercent = {0};' -f $lowBatteryPercent)
 )
 [IO.File]::WriteAllText($header, ($lines -join "`n") + "`n", [Text.Encoding]::ASCII)

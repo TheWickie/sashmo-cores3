@@ -1,4 +1,6 @@
 import asyncio
+import json
+import subprocess
 
 from sashmo.conversation import ConversationProvider
 
@@ -93,3 +95,32 @@ def test_codex_activity_answer_uses_bounded_status_without_plan(tmp_path):
     assert "1 is active" in reply
     assert "2 recent Codex tasks" in reply
     assert client.requests == []
+
+
+def test_named_project_discussion_sends_only_user_briefing_and_git_status(tmp_path):
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    (repo / "README.md").write_text("private source context", encoding="utf-8")
+    config = tmp_path / "projects.local.json"
+    config.write_text(json.dumps({"allowed_roots": [str(tmp_path)], "projects": [
+        {"id": "sample", "name": "Sample", "path": str(repo),
+         "briefing": "A planning tool; next task is a better dashboard."}
+    ]}), encoding="utf-8")
+    client = FakePlanClient()
+    provider = ConversationProvider(config, client=client)
+
+    reply = asyncio.run(provider.respond("What should we work on next in Sample?", None, True))
+    assert reply == "A short spoken reply."
+    assert provider.sensitive_output is True
+    messages = client.requests[-1][2]
+    sent = json.dumps(messages)
+    assert "A planning tool" in sent
+    assert "private source context" not in sent
+    assert str(repo) not in sent
+
+    provider.sensitive_output = False
+    local = asyncio.run(provider.respond("What is Sample's Git status?", None, True))
+    assert "uncommitted changes" in local
+    assert provider.sensitive_output is False
+    assert len(client.requests) == 1
