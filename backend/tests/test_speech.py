@@ -61,6 +61,23 @@ def test_longer_questions_fit_the_new_voice_limit():
         validate_wav(wav_seconds(21))
 
 
+def test_local_speech_falls_back_when_reply_exceeds_device_limit(monkeypatch):
+    def fake_bridge(mode, input_path, output_path):
+        words = input_path.read_text(encoding="utf-8")
+        seconds = 21 if not words.startswith("That answer was too long") else 2
+        with wave.open(str(output_path), "wb") as writer:
+            writer.setnchannels(1)
+            writer.setsampwidth(2)
+            writer.setframerate(16000)
+            writer.writeframes(b"\0\0" * (16000 * seconds))
+
+    monkeypatch.setattr(speech, "_run_bridge", fake_bridge)
+    result = speech.synthesize("A " * 150)
+    validate_wav(result)
+    with wave.open(io.BytesIO(result), "rb") as reader:
+        assert reader.getnframes() == 32000
+
+
 def test_text_provider_can_be_replaced_without_changing_speech_transport(monkeypatch):
     async def fake_transcribe(_audio):
         return "hello", 1.0

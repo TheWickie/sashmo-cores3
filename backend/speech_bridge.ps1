@@ -48,6 +48,7 @@ if ($Mode -eq 'Recognize' -or $Mode -eq 'Wake') {
     $text = [IO.File]::ReadAllText($InputPath, [Text.Encoding]::UTF8)
     $synthesizer = [System.Speech.Synthesis.SpeechSynthesizer]::new()
     try {
+        $synthesizer.Rate = 2
         $format = [System.Speech.AudioFormat.SpeechAudioFormatInfo]::new(
             16000,
             [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen,

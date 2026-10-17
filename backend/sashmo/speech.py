@@ -114,11 +114,23 @@ def synthesize(text: str) -> bytes:
     with tempfile.TemporaryDirectory(prefix="sashmo-speech-") as temp:
         input_path = Path(temp) / "response.txt"
         output_path = Path(temp) / "response.wav"
-        input_path.write_text(text, encoding="utf-8")
-        _run_bridge("Synthesize", input_path, output_path)
-        data = output_path.read_bytes()
-        validate_wav(data, max_seconds=20)
-        return data
+        candidates = [text]
+        for limit in (210, 130):
+            if len(text) > limit:
+                candidates.append(text[:limit].rsplit(" ", 1)[0].rstrip(".,; ") + ". Ask me for more.")
+        candidates.append("That answer was too long to play. Please ask me for a shorter summary.")
+        for candidate in candidates:
+            input_path.write_text(candidate, encoding="utf-8")
+            _run_bridge("Synthesize", input_path, output_path)
+            data = output_path.read_bytes()
+            try:
+                validate_wav(data, max_seconds=20)
+            except ValueError as exc:
+                if "duration limit" not in str(exc):
+                    raise
+            else:
+                return data
+        raise ValueError("Speech output exceeded the device duration limit")
 
 
 def normalize_reply_wav(data: bytes) -> bytes:
