@@ -10,7 +10,7 @@ This document distinguishes code, desktop observations and physical device tests
 - The firmware now requests an immediate pulse when Wi-Fi reconnects and has configurable USB, active-battery, idle-battery and low-battery brightness. This revision compiled, flashed successfully and passed the short unplugged voice test.
 - An independent per-user Windows service host now owns the backend. In a live migration, the old dashboard closed, the host took over, the CoreS3 resumed pulses, and the host restarted the backend after a forced process exit. The host is registered for Windows sign-in; closing the dashboard no longer stops the backend.
 - The user has now signed in through Sashmo and selected a ChatGPT plan model. A short text request through that model completed successfully. Two-turn CoreS3 voice conversation still needs a physical test.
-- A five-minute display standby now applies on USB and battery. It uses panel sleep while leaving Wi-Fi and the service loop active; the first tap wakes without activating a control. The firmware compiled, flashed to COM4 and passed flash hash verification. Physical timeout and wake behavior still need user observation.
+- A five-minute display standby now applies on USB and battery. It uses panel sleep while leaving Wi-Fi and the service loop active; the first tap wakes without activating a control. The firmware compiled, flashed to COM4 and passed flash hash verification. While USB powered, authenticated device telemetry reported `screen_sleeping=true` and subsequent Wi-Fi pulses continued. A visual timeout and wake check still needs user observation.
 
 ## Milestone 1: standalone battery operation
 
