@@ -97,6 +97,18 @@ def test_codex_activity_answer_uses_bounded_status_without_plan(tmp_path):
     assert client.requests == []
 
 
+def test_recent_codex_projects_answer_stays_local_and_sensitive(tmp_path):
+    class State:
+        codex_projects_error = None
+        codex_projects = [{"name": "Sashmo"}, {"name": "Another"}]
+    client = FakePlanClient()
+    provider = ConversationProvider(tmp_path / "projects.local.json", client=client, state=State())
+    reply = asyncio.run(provider.respond("What are my recent projects?", None, True))
+    assert "Sashmo" in reply and "Another" in reply
+    assert provider.sensitive_output is True
+    assert client.requests == []
+
+
 def test_named_project_discussion_sends_only_user_briefing_and_git_status(tmp_path):
     repo = tmp_path / "sample"
     repo.mkdir()

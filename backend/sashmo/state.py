@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .codex_rpc import CodexAppServer
-from .codex_sessions import recent_sessions
+from .codex_sessions import recent_sessions, recent_projects
 from .quota import normalize_quota
 
 
@@ -26,6 +26,7 @@ class StateStore:
         self.device_charging: bool | None = None
         self.device_usb_powered: bool | None = None
         self.device_wifi_rssi: int | None = None
+        self.device_screen_sleeping: bool | None = None
         self.voice_state = "idle"
         self.voice_provider = "local"
         self.last_voice_local: str | None = None
@@ -36,6 +37,8 @@ class StateStore:
         self.calendar_error: str | None = "Not connected"
         self.codex_sessions: list[dict[str, Any]] = []
         self.codex_sessions_error: str | None = "Waiting for Codex"
+        self.codex_projects: list[dict[str, Any]] = []
+        self.codex_projects_error: str | None = "Waiting for Codex"
         self.telemetry_path = telemetry_path
 
     def update(self, quota: dict[str, Any] | None, connected: bool, error: str | None) -> None:
@@ -97,6 +100,12 @@ class StateStore:
             self.codex_sessions = sessions
         self.codex_sessions_error = error
 
+    def update_codex_projects(self, projects: list[dict[str, Any]] | None,
+                              error: str | None) -> None:
+        if projects is not None:
+            self.codex_projects = projects
+        self.codex_projects_error = error
+
     def notify(self, key: str, title: str, summary: str) -> None:
         """Replace one local alert by stable key; do not include credentials or transcripts."""
         item = {"key": key[:64], "title": title[:60], "summary": summary[:120]}
@@ -114,12 +123,14 @@ class StateStore:
             self.version += 1
 
     def record_device(self, battery: int | None, charging: bool | None,
-                      usb: bool | None, wifi_rssi: int | None) -> None:
+                      usb: bool | None, wifi_rssi: int | None,
+                      screen_sleeping: bool | None = None) -> None:
         self.device_last_seen = datetime.now(timezone.utc)
         self.device_battery_percent = battery if battery is not None and 0 <= battery <= 100 else None
         self.device_charging = charging
         self.device_usb_powered = usb
         self.device_wifi_rssi = wifi_rssi if wifi_rssi is not None and -120 <= wifi_rssi <= 0 else None
+        self.device_screen_sleeping = screen_sleeping
         if usb is False and battery is not None and battery <= 15:
             self.notify("battery_low", "Low battery", f"CoreS3 battery is at {battery}%.")
         elif usb is True or (battery is not None and battery > 20):
@@ -152,7 +163,8 @@ class StateStore:
                        "battery_percent": self.device_battery_percent,
                        "charging": self.device_charging,
                        "usb_powered": self.device_usb_powered,
-                       "wifi_rssi": self.device_wifi_rssi},
+                       "wifi_rssi": self.device_wifi_rssi,
+                       "screen_sleeping": self.device_screen_sleeping},
             "voice": {"state": self.voice_state, "last_request_local": self.last_voice_local,
                       "provider": self.voice_provider},
             "notifications": {"count": len(self.notifications), "items": self.notifications},
@@ -161,6 +173,7 @@ class StateStore:
             "calendar": {"connected": self.calendar_snapshot is not None and self.calendar_error is None,
                          "error": self.calendar_error, "snapshot": self.calendar_snapshot},
             "codex_sessions": {"error": self.codex_sessions_error, "items": self.codex_sessions},
+            "codex_projects": {"error": self.codex_projects_error, "items": self.codex_projects},
         }
 
 
@@ -198,6 +211,11 @@ class QuotaWorker:
                         self.state.update_codex_sessions([item.as_dict() for item in sessions], None)
                     except (Exception, asyncio.TimeoutError):
                         self.state.update_codex_sessions(None, "Recent Codex task status unavailable")
+                    try:
+                        projects = await asyncio.wait_for(recent_projects(rpc, limit=10), timeout=45)
+                        self.state.update_codex_projects([item.as_dict() for item in projects], None)
+                    except (Exception, asyncio.TimeoutError):
+                        self.state.update_codex_projects(None, "Recent Codex projects unavailable")
                     try:
                         await asyncio.wait_for(rpc.updated.wait(), timeout=self.poll_seconds)
                     except asyncio.TimeoutError:

@@ -9,7 +9,7 @@
 #include "splash_image.h"
 
 constexpr uint32_t kSampleRate = 16000;
-constexpr size_t kRecordSamples = kSampleRate * 4;
+constexpr size_t kRecordSamples = kSampleRate * 6;
 constexpr size_t kWavHeaderBytes = 44;
 constexpr size_t kMaxReplyBytes = 700000;
 
@@ -387,6 +387,7 @@ void fetchPulse() {
                    + "&battery=" + String(batteryLevel)
                    + "&charging=" + String(charging ? 1 : 0)
                    + "&usb=" + String(usbPowered ? 1 : 0)
+                   + "&screen_sleeping=" + String(displaySleeping ? 1 : 0)
                    + "&wifi_rssi=" + String(WiFi.RSSI());
   http.begin(url);
   http.setTimeout(5000);
@@ -465,7 +466,7 @@ void pushToTalk() {
     failVoice("Microphone failed");
     return;
   }
-  const uint32_t deadline = millis() + 6000;
+  const uint32_t deadline = millis() + 8000;
   while (M5.Mic.isRecording() && static_cast<int32_t>(deadline - millis()) > 0) delay(10);
   const bool complete = M5.Mic.isRecording() == 0;
   M5.Mic.end();

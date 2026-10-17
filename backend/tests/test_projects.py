@@ -99,3 +99,23 @@ def test_discussion_context_uses_only_explicit_notes_and_git_status(tmp_path: Pa
     assert "Source content must stay local" not in json.dumps(context)
     assert str(repo) not in json.dumps(context)
     assert registry.discussion_context("What about another project?") is None
+
+
+def test_file_discussion_reads_bounded_tracked_text_only_when_enabled(tmp_path: Path) -> None:
+    repo = tmp_path / "sample"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "README.md").write_text("This project schedules garden watering.", encoding="utf-8")
+    (repo / "api_key.txt").write_text("must never appear", encoding="utf-8")
+    (repo / "notes.txt").write_text("password = garden-secret", encoding="utf-8")
+    (repo / "untracked.md").write_text("untracked private note", encoding="utf-8")
+    _git(repo, "add", "README.md", "api_key.txt", "notes.txt")
+    config = _config(tmp_path, [tmp_path], [{"id": "sample", "name": "Sample", "path": str(repo),
+                                             "file_context": True}])
+    context = ProjectRegistry(config).discussion_context("What should Sample do next?")
+    assert context is not None
+    assert "garden watering" in context["files"]
+    assert "must never appear" not in context["files"]
+    assert "garden-secret" not in context["files"]
+    assert "untracked private note" not in context["files"]
+    assert str(repo) not in json.dumps(context)

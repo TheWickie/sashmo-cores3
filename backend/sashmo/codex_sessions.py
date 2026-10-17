@@ -2,12 +2,14 @@
 
 The App Server's ``thread/list`` and ``thread/turns/list`` methods are documented
 at https://developers.openai.com/codex/app-server/ . No user prompts, turn
-items, working directories, or project paths are copied into these summaries.
+items, full working directories, or full project paths are copied into these summaries.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from pathlib import PureWindowsPath
+import re
 from typing import Any, Protocol
 
 
@@ -27,6 +29,72 @@ class SessionSummary:
 
     def as_dict(self) -> dict[str, str | int | None]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class ProjectSummary:
+    """A recent workspace name, with no working path or task content."""
+
+    name: str
+    updated_at: int | None
+
+    def as_dict(self) -> dict[str, str | int | None]:
+        return asdict(self)
+
+
+def _workspace_name(cwd: Any) -> tuple[str, str] | None:
+    if not isinstance(cwd, str) or not cwd or len(cwd) > 1024:
+        return None
+    normal = cwd.replace("/", "\\").rstrip("\\")
+    # Codex's dated chat scratch folders are not saved projects.
+    if re.search(r"\\Documents\\Codex\\\d{4}-\d{2}-\d{2}\\", normal, re.I):
+        return None
+    name = PureWindowsPath(normal).name
+    if re.fullmatch(r"g-p-[0-9a-f]{16,}", name, re.I):
+        return None
+    if not name or name in (".", "..") or any(ord(c) < 32 for c in name):
+        return None
+    return normal.casefold(), name[:80]
+
+
+async def recent_projects(client: RpcClient, limit: int = 10) -> list[ProjectSummary]:
+    """Group recent Codex tasks by workspace, newest first, without reading files.
+
+    A bounded scan walks up to twenty pages of 20 tasks. Project names are local
+    folder names; task prompts, source files, and full paths are not returned.
+    """
+    if not 1 <= limit <= 10:
+        raise ValueError("limit must be between 1 and 10")
+    found: list[ProjectSummary] = []
+    seen: set[str] = set()
+    cursor: str | None = None
+    for _ in range(20):
+        params: dict[str, Any] = {
+            "limit": 20, "sortKey": "recency_at", "sortDirection": "desc",
+            "sourceKinds": ["cli", "vscode", "appServer"], "archived": False,
+            "useStateDbOnly": True,
+        }
+        if cursor:
+            params["cursor"] = cursor
+        result = await client.request("thread/list", params)
+        rows = result.get("data") if isinstance(result, dict) else None
+        if not isinstance(rows, list):
+            break
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            workspace = _workspace_name(row.get("cwd"))
+            if workspace is None or workspace[0] in seen:
+                continue
+            seen.add(workspace[0])
+            found.append(ProjectSummary(workspace[1], _timestamp(row.get("recencyAt") or row.get("updatedAt"))))
+            if len(found) >= limit:
+                return found
+        next_cursor = result.get("nextCursor")
+        if not isinstance(next_cursor, str) or not next_cursor or next_cursor == cursor:
+            break
+        cursor = next_cursor
+    return found
 
 
 def _timestamp(value: Any) -> int | None:

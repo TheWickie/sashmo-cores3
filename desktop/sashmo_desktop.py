@@ -128,6 +128,15 @@ class ServiceController:
         with urllib.request.urlopen(request, timeout=35) as response:
             return json.load(response)
 
+    def codex_request_action(self, action: str) -> dict:
+        if action not in ("approve", "reject"):
+            raise ValueError("Invalid Codex request action")
+        url, headers = self.endpoint()
+        request = urllib.request.Request(url.replace("/v1/status", f"/v1/codex-task/{action}"),
+                                         headers=headers, method="POST", data=b"")
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.load(response)
+
     def port_occupied(self) -> bool:
         config = load_config()
         try:
@@ -340,7 +349,7 @@ class SashmoDesktop(tk.Tk):
         self.poll_var = tk.StringVar(value=str(config.get("codex_poll_seconds", 300)))
         tk.Entry(row, textvariable=self.poll_var, width=8, bg=PANEL_LIGHT, fg=TEXT,
                  insertbackground=TEXT, relief="flat", font=("Segoe UI", 11), justify="center").pack(side="right")
-        self._label(card, "Allowed range: 30–3600. Saving restarts a service launched by this dashboard.", 9, MUTED).pack(anchor="w", padx=24)
+        self._label(card, "Allowed range: 30–3600. Saving restarts the independent service.", 9, MUTED).pack(anchor="w", padx=24)
         self.autostart_var = tk.BooleanVar(value=autostart_enabled())
         tk.Checkbutton(card, text="Keep the Sashmo backend running after Windows sign-in", variable=self.autostart_var,
                        bg=PANEL, fg=TEXT, selectcolor=PANEL_LIGHT, activebackground=PANEL,
@@ -353,19 +362,35 @@ class SashmoDesktop(tk.Tk):
         key_text = "OpenAI speech key: available on this PC" if KEY_FILE.is_file() else "OpenAI speech key: missing; Windows fallback only"
         self._label(note, key_text, 11, TEXT).pack(anchor="w", padx=24, pady=4)
         self._label(note, "Cedar speech and transcription may use your API billing.", 10, MUTED).pack(anchor="w", padx=24, pady=4)
-        self._label(note, "Conversational inference is disabled until a separate provider is configured.", 10, MUTED).pack(anchor="w", padx=24, pady=(4, 20))
+        self._label(note, "ChatGPT plan conversation requires its own sign-in and model selection. Billed text API inference is disabled.",
+                    10, MUTED, wraplength=620, justify="left").pack(anchor="w", padx=24, pady=(4, 20))
 
-        self._label(page, "Device pulse intervals are embedded in firmware; changing them requires a rebuild and flash.",
-                    10, MUTED).pack(anchor="w", pady=(18, 0))
+        standby_minutes = int(config.get("screen_standby_after_seconds", 300)) // 60
+        self._label(page, f"CoreS3 display standby: {standby_minutes} minutes on USB or battery. First tap wakes it.",
+                    10, MUTED).pack(anchor="w", pady=(18, 4))
+        self._label(page, "Device standby and pulse settings are embedded in firmware; changing them requires a rebuild and flash.",
+                    10, MUTED).pack(anchor="w")
 
     def _build_projects(self) -> None:
         page = self._page("projects")
         self._heading(page, "Projects", "Only folders you add here can be inspected by Sashmo")
+        self._label(page, "VOICE REQUEST FOR CODEX", 10, MUTED, "bold").pack(anchor="w", pady=(0, 5))
+        self.codex_request_note = self._label(page, "No request waiting", 10, TEXT,
+                                               wraplength=650, justify="left")
+        self.codex_request_note.pack(anchor="w", pady=(0, 7))
+        request_actions = tk.Frame(page, bg=BG)
+        request_actions.pack(fill="x", pady=(0, 16))
+        self._button(request_actions, "Send to Codex", lambda: self._codex_request_action("approve"), True).pack(side="left")
+        self._button(request_actions, "Dismiss", lambda: self._codex_request_action("reject")).pack(side="left", padx=10)
+        self._label(page, "TEN MOST RECENT CODEX PROJECTS", 10, MUTED, "bold").pack(anchor="w", pady=(0, 5))
+        self.recent_projects_note = self._label(page, "Waiting for Codex…", 10, TEXT,
+                                                wraplength=650, justify="left")
+        self.recent_projects_note.pack(anchor="w", pady=(0, 15))
         row = tk.Frame(page, bg=BG)
         row.pack(fill="x", pady=(0, 14))
         self._button(row, "Add Git project", self._add_project, True).pack(side="left")
         self._button(row, "Refresh", self._refresh_projects).pack(side="left", padx=10)
-        self._button(row, "Discussion notes", self._edit_project_briefing).pack(side="left")
+        self._button(row, "Discussion access", self._edit_project_briefing).pack(side="left")
         self.projects_note = self._label(page, "Loading approved projects…", 11, MUTED)
         self.projects_note.pack(anchor="w", pady=(0, 12))
         self.projects_view = tk.Text(page, bg=PANEL, fg=TEXT, insertbackground=TEXT, relief="flat",
@@ -718,6 +743,25 @@ class SashmoDesktop(tk.Tk):
 
         threading.Thread(target=work, daemon=True).start()
 
+    def _codex_request_action(self, action: str) -> None:
+        request = ((self.status or {}).get("codex_task_requests") or {}).get("pending")
+        if not request or request.get("state") != "desktop_review":
+            messagebox.showinfo("Sashmo Codex", "No confirmed voice request is waiting for review.", parent=self)
+            return
+        if action == "approve" and not messagebox.askyesno(
+                "Send to Codex", f"Project: {request['project_name']}\n\nRequest: {request['instruction']}\n\n"
+                "Start a Codex coding task in this project?", parent=self):
+            return
+
+        def work() -> None:
+            try:
+                result = self.controller.codex_request_action(action)
+                self.results.put(("codex_request_action", action, result, None))
+            except Exception as exc:
+                self.results.put(("codex_request_action", action, None, type(exc).__name__))
+
+        threading.Thread(target=work, daemon=True).start()
+
     def _render_projects(self, result: dict | None, error: str | None) -> None:
         if error:
             self.projects_note.configure(text="Desktop service unavailable. Start it and refresh.")
@@ -743,7 +787,8 @@ class SashmoDesktop(tk.Tk):
             if state == "ok":
                 change = "Uncommitted changes" if project.get("dirty") else "Working tree clean"
                 lines.append(f"{name}\n  Branch: {project.get('branch') or 'unknown'} · {change}\n"
-                             f"  Last commit: {project.get('last_commit') or 'none'}")
+                             f"  Last commit: {project.get('last_commit') or 'none'}\n"
+                             f"  File reading: {'enabled' if project.get('file_context') else 'off'}")
             else:
                 lines.append(f"{name}\n  Status unavailable: {state}")
         self._set_projects_text("\n\n".join(lines) if lines else "No projects are listed yet.")
@@ -792,9 +837,9 @@ class SashmoDesktop(tk.Tk):
             return
 
         dialog = tk.Toplevel(self)
-        dialog.title("Project discussion notes")
+        dialog.title("Project discussion access")
         dialog.configure(bg=BG)
-        dialog.geometry("620x410")
+        dialog.geometry("620x470")
         dialog.transient(self)
         dialog.grab_set()
         frame = tk.Frame(dialog, bg=BG)
@@ -805,16 +850,21 @@ class SashmoDesktop(tk.Tk):
         selector = ttk.Combobox(frame, textvariable=chosen, values=list(choices), state="readonly", width=58)
         selector.pack(anchor="w", pady=(8, 14))
         self._label(frame, "Write a short overview of the work you want to discuss.", 10, TEXT).pack(anchor="w")
-        self._label(frame, "Only these notes and current Git status go to your selected ChatGPT model "
-                    "when you name this project. Leave blank to keep it status-only. Do not enter secrets.",
+        self._label(frame, "When you name this project, notes and Git status can go to your selected ChatGPT model. "
+                    "You may also enable read-only excerpts from tracked project files. Do not enter secrets.",
                     10, MUTED, wraplength=560, justify="left").pack(anchor="w", pady=(4, 10))
         notes = tk.Text(frame, bg=PANEL, fg=TEXT, insertbackground=TEXT, relief="flat",
                         font=("Segoe UI", 11), wrap="word", height=8, padx=12, pady=10)
         notes.pack(fill="both", expand=True)
+        file_access = tk.BooleanVar(value=False)
+        tk.Checkbutton(frame, text="Allow Sashmo to read tracked project text files for discussion",
+                       variable=file_access, bg=BG, fg=TEXT, selectcolor=PANEL,
+                       activebackground=BG, activeforeground=TEXT).pack(anchor="w", pady=(10, 0))
 
         def load_notes(_event=None) -> None:
             notes.delete("1.0", "end")
             notes.insert("1.0", choices[chosen.get()].get("briefing", ""))
+            file_access.set(bool(choices[chosen.get()].get("file_context", False)))
 
         def save_notes() -> None:
             value = notes.get("1.0", "end-1c").strip()
@@ -824,6 +874,7 @@ class SashmoDesktop(tk.Tk):
                 return
             selected = choices[chosen.get()]
             selected["briefing"] = value
+            selected["file_context"] = bool(file_access.get())
             temp_dir = ROOT / "work"
             temp_dir.mkdir(parents=True, exist_ok=True)
             fd, temp_name = tempfile.mkstemp(prefix="sashmo-projects-", suffix=".tmp", dir=temp_dir)
@@ -842,7 +893,7 @@ class SashmoDesktop(tk.Tk):
 
         selector.bind("<<ComboboxSelected>>", load_notes)
         load_notes()
-        self._button(frame, "Save discussion notes", save_notes, True).pack(anchor="e", pady=(14, 0))
+        self._button(frame, "Save discussion access", save_notes, True).pack(anchor="e", pady=(14, 0))
 
     def _build_diagnostics(self) -> None:
         page = self._page("diagnostics")
@@ -960,6 +1011,10 @@ class SashmoDesktop(tk.Tk):
                     self._poll_done(item[1], item[2])
                 elif item[0] == "projects":
                     self._render_projects(item[1], item[2])
+                elif item[0] == "codex_request_action":
+                    self.last_message = ("Codex task started" if item[1] == "approve" else "Voice request dismissed") \
+                        if item[3] is None else f"Codex request failed: {item[3]}"
+                    self._begin_poll()
                 elif item[0] == "accounts":
                     self._render_accounts(item[1], item[2])
                 elif item[0] == "models":
@@ -998,6 +1053,8 @@ class SashmoDesktop(tk.Tk):
             self.codex_state.configure(text="Service unavailable")
             self.codex_updated.configure(text="Last quota update: —")
             self.codex_tasks.configure(text="Recent Codex tasks: —")
+            self.recent_projects_note.configure(text="Recent Codex projects unavailable while the service is offline")
+            self.codex_request_note.configure(text="Voice request review unavailable while the service is offline")
             self.diagnostic_summary.configure(text=f"Service unavailable ({error or 'no response'}). {self.last_message}")
             return
         status = self.status
@@ -1035,6 +1092,25 @@ class SashmoDesktop(tk.Tk):
             items = sessions.get("items") or []
             active = sum(item.get("state") == "in_progress" for item in items)
             self.codex_tasks.configure(text=f"Recent Codex tasks: {active} active · {len(items)} listed")
+        projects_status = status.get("codex_projects") or {}
+        if projects_status.get("error"):
+            recent_text = "Recent Codex projects are unavailable"
+        else:
+            recent = projects_status.get("items") or []
+            recent_text = "  ·  ".join(f"{index}. {item.get('name') or 'Unnamed'}"
+                                      for index, item in enumerate(recent[:10], 1)) or "No recent project folders found"
+        self.recent_projects_note.configure(text=recent_text)
+        task_requests = status.get("codex_task_requests") or {}
+        request = task_requests.get("pending") or {}
+        if request.get("state") == "desktop_review":
+            request_text = f"Review: {request.get('project_name')} — {request.get('instruction')}"
+        elif request.get("state") == "voice_confirmation":
+            request_text = "Waiting for spoken confirmation on the CoreS3"
+        else:
+            last = task_requests.get("last_task") or {}
+            request_text = (f"Last sent to Codex: {last.get('project_name')} · {last.get('thread_id')}"
+                            if last else "No request waiting")
+        self.codex_request_note.configure(text=request_text)
 
         device = status.get("device") or {}
         recent = bool(device.get("connected_recently"))

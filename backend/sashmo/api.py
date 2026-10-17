@@ -18,6 +18,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .calendar_worker import CalendarWorker
 from .conversation import ConversationProvider
+from .codex_tasks import CodexTaskManager
 from .gmail import GmailWorker
 from .projects import ProjectRegistry
 from .speech import process_audio, validate_wav
@@ -54,8 +55,11 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
                conversation: ConversationProvider | None = None) -> FastAPI:
     telemetry_path = Path(__file__).resolve().parents[2] / "work" / "battery-history.csv"
     store = state or StateStore(telemetry_path=telemetry_path if start_worker else None)
+    task_manager = CodexTaskManager(ProjectRegistry(Path(__file__).resolve().parents[2] /
+                                                   "projects.local.json"))
     voice_provider = conversation or (ConversationProvider(Path(__file__).resolve().parents[2] /
-                                                          "projects.local.json", state=store) if start_worker else None)
+                                                          "projects.local.json", state=store,
+                                                          task_manager=task_manager) if start_worker else None)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -77,9 +81,11 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
                 await gmail_worker.stop()
             if calendar_worker:
                 await calendar_worker.stop()
+            await task_manager.close()
 
     app = FastAPI(title="Sashmo", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.store = store
+    app.state.task_manager = task_manager
 
     def authenticate(value: str | None) -> None:
         if not value or not secrets.compare_digest(value, config.device_token):
@@ -99,17 +105,41 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
 
     @app.get("/v1/pulse")
     async def pulse(since: int = -1, battery: int | None = None, charging: bool | None = None,
-                    usb: bool | None = None, wifi_rssi: int | None = None,
+                    usb: bool | None = None, screen_sleeping: bool | None = None,
+                    wifi_rssi: int | None = None,
                     x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
         authenticate(x_sashmo_token)
-        store.record_device(battery, charging, usb, wifi_rssi)
+        store.record_device(battery, charging, usb, wifi_rssi, screen_sleeping)
         return JSONResponse(store.pulse(since), headers={"Cache-Control": "no-store"})
 
     @app.get("/v1/status")
     async def status(request: Request, x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
         authenticate(x_sashmo_token)
         local_dashboard_only(request)
-        return JSONResponse(store.status(), headers={"Cache-Control": "no-store"})
+        return JSONResponse({**store.status(), "codex_task_requests": task_manager.review_status()},
+                            headers={"Cache-Control": "no-store"})
+
+    @app.post("/v1/codex-task/approve")
+    async def approve_codex_task(request: Request,
+                                 x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
+        authenticate(x_sashmo_token)
+        local_dashboard_only(request)
+        try:
+            task = await task_manager.approve()
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception:
+            LOG.exception("Codex task dispatch failed")
+            raise HTTPException(status_code=503, detail="Could not start Codex task") from None
+        return JSONResponse(task, headers={"Cache-Control": "no-store"})
+
+    @app.post("/v1/codex-task/reject")
+    async def reject_codex_task(request: Request,
+                                x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
+        authenticate(x_sashmo_token)
+        local_dashboard_only(request)
+        await task_manager.reject()
+        return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
 
     @app.get("/v1/projects")
     async def projects(request: Request, x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:

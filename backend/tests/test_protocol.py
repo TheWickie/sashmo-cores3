@@ -32,7 +32,7 @@ def test_status_reports_authenticated_device_telemetry_without_changing_quota_ve
     with TestClient(app, client=("192.168.1.10", 50000)) as client:
         assert client.get("/v1/status").status_code == 401
         headers = {"X-Sashmo-Token": "x" * 32}
-        pulse = client.get("/v1/pulse?since=-1&battery=42&charging=1&usb=1&wifi_rssi=-51", headers=headers)
+        pulse = client.get("/v1/pulse?since=-1&battery=42&charging=1&usb=1&screen_sleeping=1&wifi_rssi=-51", headers=headers)
         assert pulse.status_code == 200
         assert pulse.json()["version"] == 0
         status = client.get("/v1/status", headers=headers).json()
@@ -41,6 +41,7 @@ def test_status_reports_authenticated_device_telemetry_without_changing_quota_ve
         assert status["device"]["charging"] is True
         assert status["device"]["usb_powered"] is True
         assert status["device"]["wifi_rssi"] == -51
+        assert status["device"]["screen_sleeping"] is True
 
 
 def test_battery_history_records_authenticated_pulses_only(tmp_path):
@@ -80,6 +81,15 @@ def test_personal_dashboard_endpoints_reject_authenticated_lan_device():
         assert client.get("/v1/pulse", headers=headers).status_code == 200
         assert client.get("/v1/status", headers=headers).status_code == 403
         assert client.get("/v1/projects", headers=headers).status_code == 403
+        assert client.post("/v1/codex-task/approve", headers=headers).status_code == 403
+        assert client.post("/v1/codex-task/reject", headers=headers).status_code == 403
+
+
+def test_codex_task_cannot_launch_without_confirmed_voice_draft():
+    app = create_app(Config("192.168.1.10", 8765, "x" * 32), start_worker=False)
+    with TestClient(app, client=("192.168.1.10", 50000)) as client:
+        headers = {"X-Sashmo-Token": "x" * 32}
+        assert client.post("/v1/codex-task/approve", headers=headers).status_code == 409
 
 
 def test_low_battery_notification_is_deduplicated_and_cleared():

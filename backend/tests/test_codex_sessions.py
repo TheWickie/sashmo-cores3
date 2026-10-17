@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from sashmo.codex_sessions import recent_sessions
+from sashmo.codex_sessions import recent_sessions, recent_projects
 
 
 class FakeRpc:
@@ -53,3 +53,17 @@ def test_bad_rows_are_skipped_and_limit_is_bounded():
     assert asyncio.run(recent_sessions(rpc, limit=3))[0].updated_at is None
     with pytest.raises(ValueError):
         asyncio.run(recent_sessions(rpc, limit=11))
+
+
+def test_recent_projects_deduplicates_workspaces_and_skips_chat_scratch():
+    rpc = FakeRpc([
+        {"cwd": r"G:\Work\Sashmo", "recencyAt": 30, "preview": "private"},
+        {"cwd": r"g:\work\sashmo", "recencyAt": 20},
+        {"cwd": r"C:\Users\Example\Documents\Codex\2026-10-17\code"},
+        {"cwd": r"G:\Work\Another", "updatedAt": 10},
+    ])
+    items = asyncio.run(recent_projects(rpc))
+    assert [(item.name, item.updated_at) for item in items] == [("Sashmo", 30), ("Another", 10)]
+    assert "private" not in str(items)
+    assert "G:" not in str(items)
+    assert all(method == "thread/list" for method, _ in rpc.calls)

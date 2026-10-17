@@ -25,6 +25,9 @@ from typing import Any
 _ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _MAX_PROJECTS = 32
 _MAX_BRIEFING = 1500
+_FILE_SUFFIXES = {".md", ".txt", ".py", ".js", ".ts", ".tsx", ".jsx", ".ino", ".cpp", ".h", ".cs", ".ps1"}
+_PRIVATE_NAME = re.compile(r"secret|credential|password|token|private|api.?key|(^|[/\\])\.env", re.I)
+_SECRET_TEXT = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|\bsk-[A-Za-z0-9_-]{16,}|\bAIza[A-Za-z0-9_-]{20,}|\b(?:client_secret|api_key|password)\s*[:=]", re.I)
 
 
 class RegistryError(ValueError):
@@ -109,12 +112,15 @@ class ProjectRegistry:
             if (not isinstance(briefing, str) or len(briefing) > _MAX_BRIEFING
                     or any(ord(char) < 32 and char not in "\n\t" for char in briefing)):
                 raise RegistryError("invalid_config")
+            file_context = project.get("file_context", False)
+            if not isinstance(file_context, bool):
+                raise RegistryError("invalid_config")
             seen.add(project_id)
             path = _absolute_path(project.get("path"))
             if not any(_under(path, root) for root in roots):
                 raise RegistryError("path_not_allowed")
             validated.append({"id": project_id, "name": name.strip(), "path": path,
-                              "briefing": briefing.strip()})
+                              "briefing": briefing.strip(), "file_context": file_context})
         return validated
 
     def list_projects(self) -> dict[str, Any]:
@@ -136,6 +142,17 @@ class ProjectRegistry:
                 return self._summary(project)
         return None
 
+    def approved_path(self, project_id: str) -> Path | None:
+        """Resolve an explicitly approved Git root for local task dispatch."""
+        try:
+            projects = self._load()
+        except RegistryError:
+            return None
+        for project in projects:
+            if project["id"] == project_id and self._summary(project)["state"] == "ok":
+                return project["path"]
+        return None
+
     def discussion_context(self, utterance: str) -> dict[str, str] | None:
         """Find an explicitly named project with a user-authored briefing.
 
@@ -152,21 +169,70 @@ class ProjectRegistry:
             project_id = project["id"]
             mentioned = (re.search(r"(?<!\w)" + re.escape(name.casefold()) + r"(?!\w)", words)
                          or re.search(r"(?<!\w)" + re.escape(project_id) + r"(?!\w)", words))
-            if mentioned and project["briefing"]:
+            if mentioned and (project["briefing"] or project["file_context"]):
                 summary = self._summary(project)
                 if summary["state"] != "ok":
                     return None
                 return {"name": name, "briefing": project["briefing"],
                         "branch": summary["branch"] or "unknown",
                         "working_tree": "uncommitted changes" if summary["dirty"] else "clean",
-                        "last_commit": summary["last_commit"] or "none"}
+                        "last_commit": summary["last_commit"] or "none",
+                        "files": self._file_context(project["path"], utterance) if project["file_context"] else ""}
         return None
+
+    @staticmethod
+    def _file_context(root: Path, utterance: str) -> str:
+        """Read a small, relevant slice of tracked text files in an approved repo.
+
+        Tracked files only; no links outside the root, private-looking filenames,
+        binary files, large files, or text with obvious credential patterns.
+        """
+        try:
+            tracked = _git(root, "ls-files", "--cached", "-z").split("\0")
+        except RegistryError:
+            return ""
+        terms = {word for word in re.findall(r"[a-z0-9]{4,}", utterance.casefold())
+                 if word not in {"what", "with", "this", "that", "should", "could", "project", "about", "next", "please"}}
+        candidates: list[tuple[int, str, Path]] = []
+        for relative in tracked[:2000]:
+            if not relative or len(relative) > 240 or _PRIVATE_NAME.search(relative):
+                continue
+            path = (root / relative).resolve()
+            if not _under(path, root) or path.suffix.casefold() not in _FILE_SUFFIXES:
+                continue
+            lower = relative.casefold()
+            if path.name.casefold() == "agents.md" or any(part.startswith(".") for part in Path(relative).parts):
+                continue
+            score = (20 if path.name.casefold().startswith("readme") else 0)
+            score += 10 if lower.startswith("docs/") or lower.startswith("docs\\") else 0
+            score += sum(8 for term in terms if term in lower)
+            candidates.append((score, relative, path))
+        candidates.sort(key=lambda item: (-item[0], item[1].casefold()))
+        excerpts: list[str] = []
+        budget = 12000
+        for _, relative, path in candidates:
+            if len(excerpts) >= 5 or budget < 500:
+                break
+            try:
+                if not path.is_file() or path.stat().st_size > 30000:
+                    continue
+                content = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                continue
+            if "\0" in content or _SECRET_TEXT.search(content):
+                continue
+            excerpt = content[:min(3000, budget)].strip()
+            if excerpt:
+                excerpts.append(f"File {relative}:\n{excerpt}")
+                budget -= len(excerpt)
+        return "\n\n".join(excerpts)
 
     @staticmethod
     def _summary(project: dict[str, Any]) -> dict[str, Any]:
         summary: dict[str, Any] = {
             "id": project["id"], "name": project["name"],
             "state": "ok", "branch": None, "dirty": None, "last_commit": None,
+            "file_context": project["file_context"],
         }
         path: Path = project["path"]
         if not path.is_dir():
