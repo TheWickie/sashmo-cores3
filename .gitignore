@@ -1,5 +1,6 @@
 wifipassword.txt
 openAIAPIKey.txt
+openAIAdminKey.txt
 WifiStatus/wifi_credentials.h
 WifiStatus/build/
 .arduino-data/

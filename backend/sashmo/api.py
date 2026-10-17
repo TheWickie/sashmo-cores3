@@ -11,12 +11,14 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from decimal import Decimal, InvalidOperation
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from .calendar_worker import CalendarWorker
+from .billing import BillingWorker
 from .conversation import ConversationProvider
 from .codex_tasks import CodexTaskManager
 from .gmail import GmailWorker
@@ -36,6 +38,8 @@ class Config:
     device_token: str
     codex_poll_seconds: int = 300
     wake_word_enabled: bool = False
+    openai_billing_api_key_id: str = ""
+    api_monthly_budget_usd: Decimal | None = None
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -50,7 +54,18 @@ class Config:
         poll = int(data.get("codex_poll_seconds", 300))
         if not 1024 <= port <= 65535 or not 30 <= poll <= 3600:
             raise ValueError("Invalid port or Codex poll interval")
-        return cls(str(host), port, token, poll, data.get("wake_word_enabled") is True)
+        key_id = str(data.get("openai_billing_api_key_id") or "").strip()
+        if key_id and (not key_id.startswith("key_") or len(key_id) > 100 or not key_id.replace("_", "").isalnum()):
+            raise ValueError("Invalid OpenAI billing API key ID")
+        try:
+            budget = (Decimal(str(data["api_monthly_budget_usd"]))
+                      if data.get("api_monthly_budget_usd") not in (None, "") else None)
+        except (InvalidOperation, TypeError) as exc:
+            raise ValueError("Invalid API monthly budget") from exc
+        if budget is not None and (not budget.is_finite() or budget <= 0 or budget > 1000000):
+            raise ValueError("Invalid API monthly budget")
+        return cls(str(host), port, token, poll, data.get("wake_word_enabled") is True,
+                   key_id, budget)
 
 
 def create_app(config: Config, *, start_worker: bool = True, state: StateStore | None = None,
@@ -69,12 +84,16 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
         worker = QuotaWorker(store, config.codex_poll_seconds) if start_worker else None
         gmail_worker = GmailWorker(store) if start_worker else None
         calendar_worker = CalendarWorker(store) if start_worker else None
+        billing_worker = BillingWorker(store, config.openai_billing_api_key_id,
+                                       config.api_monthly_budget_usd) if start_worker else None
         if worker:
             await worker.start()
         if gmail_worker:
             await gmail_worker.start()
         if calendar_worker:
             await calendar_worker.start()
+        if billing_worker:
+            await billing_worker.start()
         try:
             yield
         finally:
@@ -84,6 +103,8 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
                 await gmail_worker.stop()
             if calendar_worker:
                 await calendar_worker.stop()
+            if billing_worker:
+                await billing_worker.stop()
             await task_manager.close()
             await voice_stream.cancel()
 
@@ -115,7 +136,8 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
                     x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
         authenticate(x_sashmo_token)
         store.record_device(battery, charging, usb, wifi_rssi, screen_sleeping)
-        return JSONResponse({**store.pulse(since), "wake_word_enabled": config.wake_word_enabled},
+        return JSONResponse({**store.pulse(since), "wake_word_enabled": config.wake_word_enabled,
+                             "api_billing": store.billing_pulse()},
                             headers={"Cache-Control": "no-store"})
 
     @app.get("/v1/status")

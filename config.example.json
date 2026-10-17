@@ -17,5 +17,7 @@
   "screen_standby_after_seconds": 300,
   "wake_word_enabled": false,
   "wake_on_battery": false,
+  "openai_billing_api_key_id": "",
+  "api_monthly_budget_usd": null,
   "low_battery_percent": 15
 }

@@ -16,6 +16,7 @@ import tkinter as tk
 import urllib.error
 import urllib.request
 import webbrowser
+from decimal import Decimal, InvalidOperation
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -292,6 +293,7 @@ class SashmoDesktop(tk.Tk):
         cards.grid_rowconfigure(0, minsize=280, weight=1)
         cards.grid_rowconfigure(1, minsize=120)
         cards.grid_rowconfigure(2, minsize=110)
+        cards.grid_rowconfigure(3, minsize=92)
         quota_card = Card(cards, row=0, column=0, sticky="nsew", padx=(0, 9), pady=(0, 12))
         device_card = Card(cards, row=0, column=1, sticky="nsew", padx=(9, 0), pady=(0, 12))
         self._label(quota_card, "CODEX ALLOWANCE", 10, MUTED, "bold").pack(anchor="w", padx=23, pady=(22, 10))
@@ -334,10 +336,26 @@ class SashmoDesktop(tk.Tk):
         self.codex_tasks = self._label(codex_card, "Recent Codex work: —", 10, MUTED)
         self.codex_tasks.pack(anchor="w", padx=23, pady=(0, 18))
 
+        billing_card = Card(cards, row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        self._label(billing_card, "OPENAI API BILLING · THIS DEVICE", 10, MUTED, "bold").pack(anchor="w", padx=23, pady=(15, 5))
+        self.api_billing_value = self._label(billing_card, "Checking billed costs…", 14, TEXT, "bold")
+        self.api_billing_value.pack(anchor="w", padx=23)
+        self.api_billing_note = self._label(billing_card, "From OpenAI Costs; updated every 15 minutes when configured", 9, MUTED)
+        self.api_billing_note.pack(anchor="w", padx=23, pady=(4, 14))
+
     def _build_settings(self) -> None:
         page = self._page("settings")
         self._heading(page, "Settings", "Local controls for this PC. Credentials stay outside the device.")
-        card = Card(page)
+        scroll = tk.Canvas(page, bg=BG, highlightthickness=0)
+        scroll.pack(side="left", fill="both", expand=True)
+        scrollbar = tk.Scrollbar(page, command=scroll.yview)
+        scrollbar.pack(side="right", fill="y")
+        scroll.configure(yscrollcommand=scrollbar.set)
+        settings_body = tk.Frame(scroll, bg=BG)
+        body_window = scroll.create_window((0, 0), window=settings_body, anchor="nw")
+        settings_body.bind("<Configure>", lambda _event: scroll.configure(scrollregion=scroll.bbox("all")))
+        scroll.bind("<Configure>", lambda event: scroll.itemconfigure(body_window, width=event.width))
+        card = Card(settings_body)
         card.pack(fill="x")
         self._label(card, "DESKTOP SERVICE", 10, MUTED, "bold").pack(anchor="w", padx=24, pady=(22, 9))
         config = load_config()
@@ -360,9 +378,8 @@ class SashmoDesktop(tk.Tk):
                        activeforeground=TEXT, font=("Segoe UI", 11), anchor="w").pack(anchor="w", padx=20, pady=(0, 5))
         self._label(card, "Off: tap the touchscreen microphone for each request; no automatic follow-up listening.",
                     9, MUTED).pack(anchor="w", padx=24, pady=(0, 12))
-        self._button(card, "Save settings", self._save_settings, True).pack(anchor="w", padx=24, pady=(0, 23))
 
-        note = Card(page)
+        note = Card(settings_body)
         note.pack(fill="x", pady=(16, 0))
         self._label(note, "AUDIO AND SECURITY", 10, MUTED, "bold").pack(anchor="w", padx=24, pady=(20, 8))
         key_text = "OpenAI speech key: available on this PC" if KEY_FILE.is_file() else "OpenAI speech key: missing; Windows fallback only"
@@ -371,15 +388,34 @@ class SashmoDesktop(tk.Tk):
         self._label(note, "ChatGPT plan conversation requires its own sign-in and model selection. Billed text API inference is disabled.",
                     10, MUTED, wraplength=620, justify="left").pack(anchor="w", padx=24, pady=(4, 20))
 
+        billing = Card(settings_body)
+        billing.pack(fill="x", pady=(16, 0))
+        self._label(billing, "API SPENDING ON THIS DEVICE", 10, MUTED, "bold").pack(anchor="w", padx=24, pady=(16, 5))
+        self._label(billing, "For actual billed costs, use a dedicated Sashmo API key and keep an OpenAI organization admin key in openAIAdminKey.txt on this PC.",
+                    9, MUTED, wraplength=620, justify="left").pack(anchor="w", padx=24)
+        billing_row = tk.Frame(billing, bg=PANEL)
+        billing_row.pack(fill="x", padx=24, pady=(9, 4))
+        self._label(billing_row, "Sashmo API key ID", 10, TEXT).pack(side="left")
+        self.billing_key_var = tk.StringVar(value=str(config.get("openai_billing_api_key_id") or ""))
+        tk.Entry(billing_row, textvariable=self.billing_key_var, width=30, bg=PANEL_LIGHT, fg=TEXT,
+                 insertbackground=TEXT, relief="flat", font=("Segoe UI", 10)).pack(side="right")
+        budget_row = tk.Frame(billing, bg=PANEL)
+        budget_row.pack(fill="x", padx=24, pady=(0, 12))
+        self._label(budget_row, "Monthly budget (USD, optional)", 10, TEXT).pack(side="left")
+        self.billing_budget_var = tk.StringVar(value=str(config.get("api_monthly_budget_usd") or ""))
+        tk.Entry(budget_row, textvariable=self.billing_budget_var, width=12, bg=PANEL_LIGHT, fg=TEXT,
+                 insertbackground=TEXT, relief="flat", font=("Segoe UI", 10), justify="right").pack(side="right")
+        self._button(billing, "Save settings", self._save_settings, True).pack(anchor="w", padx=24, pady=(0, 16))
+
         standby_minutes = int(config.get("screen_standby_after_seconds", 300)) // 60
-        self._label(page, f"CoreS3 display standby: {standby_minutes} minutes on USB or battery. First tap wakes it.",
+        self._label(settings_body, f"CoreS3 display standby: {standby_minutes} minutes on USB or battery. First tap wakes it.",
                     10, MUTED).pack(anchor="w", pady=(18, 4))
         wake_power = "USB and battery" if config.get("wake_on_battery", False) else "USB power only"
         wake_status = wake_power if config.get("wake_word_enabled", False) else "off"
-        self.wake_status_label = self._label(page, f"'Hello Sashmo' wake listening: {wake_status}. Recognition stays on this PC.",
+        self.wake_status_label = self._label(settings_body, f"'Hello Sashmo' wake listening: {wake_status}. Recognition stays on this PC.",
                                              10, MUTED)
         self.wake_status_label.pack(anchor="w", pady=(0, 4))
-        self._label(page, "Device standby and pulse settings are embedded in firmware; changing them requires a rebuild and flash.",
+        self._label(settings_body, "Device standby and pulse settings are embedded in firmware; changing them requires a rebuild and flash.",
                     10, MUTED).pack(anchor="w")
 
     def _build_projects(self) -> None:
@@ -1060,6 +1096,8 @@ class SashmoDesktop(tk.Tk):
             self.device_power.configure(text="Battery: —")
             self.device_wifi.configure(text="Wi-Fi signal: —")
             self.device_source.configure(text="Power source: —")
+            self.api_billing_value.configure(text="Billed cost unavailable")
+            self.api_billing_note.configure(text="Desktop service offline")
             self.voice_state.configure(text="Desktop service unavailable")
             self.codex_state.configure(text="Service unavailable")
             self.codex_updated.configure(text="Last quota update: —")
@@ -1141,6 +1179,15 @@ class SashmoDesktop(tk.Tk):
                                      "Power source: battery" if source is False else "Power source: not reported")
 
         voice = status.get("voice") or {}
+        billing = status.get("api_billing") or {}
+        spent = billing.get("spent_usd")
+        left = billing.get("budget_left_usd")
+        self.api_billing_value.configure(text=(f"${spent} spent this month" +
+                                               (f" · ${left} budget left" if left is not None else ""))
+                                         if spent is not None else "Billed cost unavailable")
+        self.api_billing_note.configure(text=(f"Checked {_local_datetime(billing.get('as_of_local'))} · "
+                                              "budget left is not prepaid credit balance")
+                                        if spent is not None else billing.get("error") or "Billing monitor unavailable")
         voice_text = "Processing a voice request" if voice.get("state") == "processing" else "Ready for push-to-talk"
         self.voice_state.configure(text=voice_text)
         speech_note = ("OpenAI transcription · Cedar speech · Windows fallback" if KEY_FILE.is_file()
@@ -1176,8 +1223,21 @@ class SashmoDesktop(tk.Tk):
             interval = int(self.poll_var.get())
             if not 30 <= interval <= 3600:
                 raise ValueError("Codex refresh must be between 30 and 3600 seconds")
+            billing_key_id = self.billing_key_var.get().strip()
+            if billing_key_id and (not billing_key_id.startswith("key_") or
+                                   len(billing_key_id) > 100 or not billing_key_id.replace("_", "").isalnum()):
+                raise ValueError("Enter the Sashmo API key ID, beginning with key_")
+            budget_text = self.billing_budget_var.get().strip()
+            try:
+                budget = Decimal(budget_text) if budget_text else None
+            except InvalidOperation as exc:
+                raise ValueError("Monthly budget must be a dollar amount") from exc
+            if budget is not None and (not budget.is_finite() or budget <= 0 or budget > 1000000):
+                raise ValueError("Monthly budget must be between $0.01 and $1,000,000")
             wake_enabled = self.wake_word_var.get()
-            update_config({"codex_poll_seconds": interval, "wake_word_enabled": wake_enabled})
+            update_config({"codex_poll_seconds": interval, "wake_word_enabled": wake_enabled,
+                           "openai_billing_api_key_id": billing_key_id,
+                           "api_monthly_budget_usd": str(budget) if budget is not None else None})
             wake_power = "USB and battery" if load_config().get("wake_on_battery", False) else "USB power only"
             self.wake_status_label.configure(text=f"'Hello Sashmo' wake listening: {wake_power if wake_enabled else 'off'}. Recognition stays on this PC.")
             set_autostart(self.autostart_var.get())

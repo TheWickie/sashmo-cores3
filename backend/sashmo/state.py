@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import csv
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,10 @@ class StateStore:
         self.wake_checks = 0
         self.wake_detections = 0
         self.last_wake_local: str | None = None
+        self.billing_spent_usd: Decimal | None = None
+        self.billing_budget_usd: Decimal | None = None
+        self.billing_as_of: datetime | None = None
+        self.billing_error: str | None = "OpenAI billing monitor is not configured"
         self.notifications: list[dict[str, str]] = []
         self.gmail_snapshot: dict[str, Any] | None = None
         self.gmail_error: str | None = "Not connected"
@@ -73,6 +78,26 @@ class StateStore:
             "calendar_event_count": (len((self.calendar_snapshot or {}).get("events") or [])
                                      if self.calendar_snapshot is not None and self.calendar_error is None else None),
         }
+
+    def update_billing(self, spent: Decimal | None, budget: Decimal | None,
+                       as_of: datetime | None, error: str | None) -> None:
+        if (spent, budget, error) != (self.billing_spent_usd, self.billing_budget_usd,
+                                     self.billing_error):
+            self.version += 1
+        self.billing_spent_usd = spent
+        self.billing_budget_usd = budget
+        self.billing_as_of = as_of
+        self.billing_error = error
+
+    def billing_pulse(self) -> dict[str, Any]:
+        spent = self.billing_spent_usd
+        budget = self.billing_budget_usd
+        remaining = max(Decimal("0"), budget - spent) if spent is not None and budget is not None else None
+        return {"spent_usd": f"{spent:.2f}" if spent is not None else None,
+                "budget_left_usd": f"{remaining:.2f}" if remaining is not None else None,
+                "as_of_local": self.billing_as_of.astimezone().isoformat(timespec="minutes")
+                if self.billing_as_of else None,
+                "error": self.billing_error}
 
     def update_gmail(self, snapshot: dict[str, Any] | None, error: str | None) -> None:
         previous_count = (self.gmail_snapshot or {}).get("unread_count")
@@ -186,6 +211,7 @@ class StateStore:
                       "provider": self.voice_provider, "wake_checks": self.wake_checks,
                       "wake_detections": self.wake_detections,
                       "last_wake_local": self.last_wake_local},
+            "api_billing": self.billing_pulse(),
             "notifications": {"count": len(self.notifications), "items": self.notifications},
             "gmail": {"connected": self.gmail_snapshot is not None and self.gmail_error is None,
                       "error": self.gmail_error, "snapshot": self.gmail_snapshot},

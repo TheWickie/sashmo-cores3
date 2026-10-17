@@ -42,6 +42,8 @@ int snapshotVersion = -1;
 String planReported;
 String clockText = "--:--";
 String dateText;
+String apiSpent;
+String apiBudgetLeft;
 String errorText;
 bool codexConnected = false;
 bool serverConnected = false;
@@ -178,6 +180,21 @@ void drawIdle() {
   M5.Display.print(serverConnected ? "Desktop connected" : "Desktop disconnected");
   M5.Display.setCursor(215, 154);
   M5.Display.print(WiFi.status() == WL_CONNECTED ? "Wi-Fi OK" : "Wi-Fi offline");
+
+  M5.Display.setTextColor(0xBDF7, 0x0841);
+  M5.Display.setCursor(12, 165);
+  if (!serverConnected) M5.Display.print("API billing offline");
+  else if (apiSpent.isEmpty()) M5.Display.print("API spending unavailable");
+  else {
+    M5.Display.print("API $");
+    M5.Display.print(apiSpent);
+    M5.Display.print(" spent");
+    if (!apiBudgetLeft.isEmpty()) {
+      M5.Display.print(" | $");
+      M5.Display.print(apiBudgetLeft);
+      M5.Display.print(" budget left");
+    }
+  }
 
   M5.Display.setCursor(12, 224);
   M5.Display.setTextColor(notificationCount > 0 ? 0xFBE0 : 0xBDF7, 0x0841);
@@ -415,6 +432,15 @@ void parsePulse(const String& payload) {
       wakeWordEnabled = enabled;
       dirty = true;
       if (!enabled) stopWakeListening();
+    }
+  }
+  if (doc["api_billing"].is<JsonObject>()) {
+    const String spent = String(doc["api_billing"]["spent_usd"] | "");
+    const String left = String(doc["api_billing"]["budget_left_usd"] | "");
+    if (spent != apiSpent || left != apiBudgetLeft) {
+      apiSpent = spent;
+      apiBudgetLeft = left;
+      dirty = true;
     }
   }
   const int newVersion = doc["version"] | snapshotVersion;
