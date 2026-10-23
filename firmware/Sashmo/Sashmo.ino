@@ -4,6 +4,7 @@
 #include <M5Unified.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include <WiFiMulti.h>
 #include <esp_heap_caps.h>
 
 #include "config_private.h"
@@ -57,6 +58,10 @@ bool codexConnected = false;
 bool serverConnected = false;
 bool wakeWordEnabled = false;
 bool dirty = true;
+M5Canvas uiCanvas(&M5.Display);
+lgfx::LovyanGFX* ui = &M5.Display;
+bool uiCanvasReady = false;
+WiFiMulti wifiMulti;
 int batteryLevel = -1;
 bool batteryPresent = false;
 bool charging = false;
@@ -126,231 +131,231 @@ String resetLabel(const String& value) {
 }
 
 void drawFrame() {
-  M5.Display.fillScreen(0x0841);
-  M5.Display.fillRoundRect(8, 34, 304, 113, 12, 0x18E3);
-  M5.Display.setTextColor(0xBDF7, 0x0841);
-  M5.Display.setTextSize(2);
-  M5.Display.setCursor(10, 7);
-  M5.Display.print(clockText);
-  M5.Display.setTextSize(1);
-  M5.Display.setCursor(164, 14);
-  M5.Display.print(dateText);
-  M5.Display.setCursor(260, 14);
+  ui->fillScreen(0x0841);
+  ui->fillRoundRect(8, 34, 304, 113, 12, 0x18E3);
+  ui->setTextColor(0xBDF7, 0x0841);
+  ui->setTextSize(2);
+  ui->setCursor(10, 7);
+  ui->print(clockText);
+  ui->setTextSize(1);
+  ui->setCursor(164, 14);
+  ui->print(dateText);
+  ui->setCursor(260, 14);
   if (!usbPowered && batteryLevel >= 0 && batteryLevel <= kLowBatteryPercent) {
-    M5.Display.setTextColor(0xFBE0, 0x0841);
+    ui->setTextColor(0xFBE0, 0x0841);
   }
   if (!batteryPresent) {
-    M5.Display.print("NO BAT");
+    ui->print("NO BAT");
   } else if (batteryLevel >= 0) {
-    M5.Display.printf("%d%%", batteryLevel);
+    ui->printf("%d%%", batteryLevel);
   } else {
-    M5.Display.print("--%");
+    ui->print("--%");
   }
-  if (charging) M5.Display.print("+");
+  if (charging) ui->print("+");
   if (!usbPowered && batteryLevel >= 0 && batteryLevel <= kLowBatteryPercent) {
-    M5.Display.setCursor(265, 25);
-    M5.Display.print("LOW BAT");
+    ui->setCursor(265, 25);
+    ui->print("LOW BAT");
   }
 }
 
 void drawIdle() {
-  M5.Display.fillScreen(0x0841);
-  M5.Display.fillRoundRect(7, 5, 208, 69, 9, 0x18E3);
-  M5.Display.setTextColor(0xBDF7, 0x18E3);
-  M5.Display.setTextSize(1);
-  M5.Display.setCursor(16, 11);
-  M5.Display.print("CODEX LEFT");
+  ui->fillScreen(0x0841);
+  ui->fillRoundRect(7, 5, 208, 69, 9, 0x18E3);
+  ui->setTextColor(0xBDF7, 0x18E3);
+  ui->setTextSize(1);
+  ui->setCursor(16, 11);
+  ui->print("CODEX LEFT");
   if (windowCount > 0 && windows[0].present) {
-    M5.Display.setTextColor(0x7FEF, 0x18E3);
-    M5.Display.setTextSize(4);
-    M5.Display.setCursor(15, 22);
-    M5.Display.printf("%d%%", windows[0].remaining);
-    M5.Display.setTextSize(1);
-    M5.Display.setTextColor(0xBDF7, 0x18E3);
-    M5.Display.setCursor(115, 32);
-    M5.Display.print(durationLabel(windows[0].durationMins));
+    ui->setTextColor(0x7FEF, 0x18E3);
+    ui->setTextSize(4);
+    ui->setCursor(15, 22);
+    ui->printf("%d%%", windows[0].remaining);
+    ui->setTextSize(1);
+    ui->setTextColor(0xBDF7, 0x18E3);
+    ui->setCursor(115, 32);
+    ui->print(durationLabel(windows[0].durationMins));
   } else {
-    M5.Display.setTextSize(2);
-    M5.Display.setCursor(15, 30);
-    M5.Display.print("--%");
+    ui->setTextSize(2);
+    ui->setCursor(15, 30);
+    ui->print("--%");
   }
-  M5.Display.setTextSize(1);
-  M5.Display.setTextColor(0xFFFF, 0x18E3);
-  M5.Display.setCursor(114, 57);
-  M5.Display.print("TAP TO TALK");
-  M5.Display.setTextColor(0xFFFF, 0x0841);
-  M5.Display.setTextSize(2);
-  M5.Display.setCursor(227, 15);
-  M5.Display.print(clockText);
-  M5.Display.setTextSize(1);
-  M5.Display.setCursor(226, 48);
-  if (batteryLevel >= 0) M5.Display.printf("BAT %d%%%s", batteryLevel, charging ? "+" : "");
-  else M5.Display.print("BAT --");
+  ui->setTextSize(1);
+  ui->setTextColor(0xFFFF, 0x18E3);
+  ui->setCursor(114, 57);
+  ui->print("TAP TO TALK");
+  ui->setTextColor(0xFFFF, 0x0841);
+  ui->setTextSize(2);
+  ui->setCursor(227, 15);
+  ui->print(clockText);
+  ui->setTextSize(1);
+  ui->setCursor(226, 48);
+  if (batteryLevel >= 0) ui->printf("BAT %d%%%s", batteryLevel, charging ? "+" : "");
+  else ui->print("BAT --");
 
-  M5.Display.fillRoundRect(7, 79, 306, 80, 10, 0x41A3);
-  M5.Display.fillRoundRect(10, 82, 300, 74, 8, 0x20A2);
-  M5.Display.setTextColor(0xFBE0, 0x20A2);
-  M5.Display.setTextSize(1);
-  M5.Display.setCursor(18, 87);
-  M5.Display.printf("UPDATES %d  <", notificationCount);
-  M5.Display.setClipRect(13, 103, 294, 48);
+  ui->fillRoundRect(7, 79, 306, 80, 10, 0x41A3);
+  ui->fillRoundRect(10, 82, 300, 74, 8, 0x20A2);
+  ui->setTextColor(0xFBE0, 0x20A2);
+  ui->setTextSize(1);
+  ui->setCursor(18, 87);
+  ui->printf("UPDATES %d  <", notificationCount);
+  ui->setClipRect(13, 103, 294, 48);
   if (notificationItemsCount > 0) {
     const NotificationItem& item = notificationItems[tickerIndex % notificationItemsCount];
     const int x = 310 - tickerOffset;
-    M5.Display.setTextColor(0xFFE0, 0x20A2);
-    M5.Display.setTextSize(2);
-    M5.Display.setCursor(x, 106);
-    M5.Display.print(item.source + "  " + item.title);
-    M5.Display.setTextColor(0xFFFF, 0x20A2);
-    M5.Display.setTextSize(1);
-    M5.Display.setCursor(x, 132);
-    M5.Display.print(item.summary);
+    ui->setTextColor(0xFFE0, 0x20A2);
+    ui->setTextSize(2);
+    ui->setCursor(x, 106);
+    ui->print(item.source + "  " + item.title);
+    ui->setTextColor(0xFFFF, 0x20A2);
+    ui->setTextSize(1);
+    ui->setCursor(x, 132);
+    ui->print(item.summary);
   } else {
-    M5.Display.setTextColor(0xFFFF, 0x20A2);
-    M5.Display.setTextSize(2);
-    M5.Display.setCursor(30, 116);
-    M5.Display.print("No new updates");
+    ui->setTextColor(0xFFFF, 0x20A2);
+    ui->setTextSize(2);
+    ui->setCursor(30, 116);
+    ui->print("No new updates");
   }
-  M5.Display.clearClipRect();
+  ui->clearClipRect();
 
-  M5.Display.setTextColor(0xBDF7, 0x0841);
-  M5.Display.setTextSize(1);
-  M5.Display.setCursor(12, 169);
-  M5.Display.printf("Wi-Fi %s    PC %s    BAT %s", WiFi.status() == WL_CONNECTED ? "OK" : "OFF",
+  ui->setTextColor(0xBDF7, 0x0841);
+  ui->setTextSize(1);
+  ui->setCursor(12, 169);
+  ui->printf("Wi-Fi %s    PC %s    BAT %s", WiFi.status() == WL_CONNECTED ? "OK" : "OFF",
                     serverConnected ? "OK" : "OFF", batteryLevel >= 0 ? String(batteryLevel).c_str() : "--");
-  M5.Display.setCursor(12, 188);
-  M5.Display.printf("MAIL %s   CAL %s   VOL %d%%", mailUnreadCount >= 0 ? String(mailUnreadCount).c_str() : "--",
+  ui->setCursor(12, 188);
+  ui->printf("MAIL %s   CAL %s   VOL %d%%", mailUnreadCount >= 0 ? String(mailUnreadCount).c_str() : "--",
                     calendarEventCount >= 0 ? String(calendarEventCount).c_str() : "--", volumePercent);
-  M5.Display.setCursor(12, 207);
-  if (!apiSpent.isEmpty()) M5.Display.printf("API $%s   ", apiSpent.c_str());
-  M5.Display.print("Tap ticker for details");
-  M5.Display.fillRoundRect(245, 213, 68, 24, 5, 0x18E3);
-  M5.Display.setTextColor(0xFFFF, 0x18E3);
-  M5.Display.setCursor(253, 221);
-  M5.Display.print("VOL +/-");
+  ui->setCursor(12, 207);
+  if (!apiSpent.isEmpty()) ui->printf("API $%s   ", apiSpent.c_str());
+  ui->print("Tap ticker for details");
+  ui->fillRoundRect(245, 213, 68, 24, 5, 0x18E3);
+  ui->setTextColor(0xFFFF, 0x18E3);
+  ui->setCursor(253, 221);
+  ui->print("VOL +/-");
 }
 
 void drawVolume() {
   drawFrame();
-  M5.Display.setTextColor(0xFFFF, 0x18E3);
-  M5.Display.setTextSize(2);
-  M5.Display.setCursor(20, 48);
-  M5.Display.print("Volume");
-  M5.Display.setTextColor(0x7FEF, 0x18E3);
-  M5.Display.setTextSize(4);
-  M5.Display.setCursor(102, 84);
-  M5.Display.printf("%d%%", volumePercent);
-  M5.Display.fillRoundRect(227, 40, 75, 36, 8, 0x25F6);
-  M5.Display.setTextColor(0xFFFF, 0x25F6);
-  M5.Display.setTextSize(1);
-  M5.Display.setCursor(247, 54);
-  M5.Display.print("BACK");
-  M5.Display.fillRoundRect(20, 158, 128, 62, 10, 0x25F6);
-  M5.Display.fillRoundRect(172, 158, 128, 62, 10, 0x25F6);
-  M5.Display.setTextColor(0xFFFF, 0x25F6);
-  M5.Display.setTextSize(3);
-  M5.Display.setCursor(74, 175);
-  M5.Display.print("-");
-  M5.Display.setCursor(224, 175);
-  M5.Display.print("+");
+  ui->setTextColor(0xFFFF, 0x18E3);
+  ui->setTextSize(2);
+  ui->setCursor(20, 48);
+  ui->print("Volume");
+  ui->setTextColor(0x7FEF, 0x18E3);
+  ui->setTextSize(4);
+  ui->setCursor(102, 84);
+  ui->printf("%d%%", volumePercent);
+  ui->fillRoundRect(227, 40, 75, 36, 8, 0x25F6);
+  ui->setTextColor(0xFFFF, 0x25F6);
+  ui->setTextSize(1);
+  ui->setCursor(247, 54);
+  ui->print("BACK");
+  ui->fillRoundRect(20, 158, 128, 62, 10, 0x25F6);
+  ui->fillRoundRect(172, 158, 128, 62, 10, 0x25F6);
+  ui->setTextColor(0xFFFF, 0x25F6);
+  ui->setTextSize(3);
+  ui->setCursor(74, 175);
+  ui->print("-");
+  ui->setCursor(224, 175);
+  ui->print("+");
 }
 
 void drawDetails() {
   drawFrame();
-  M5.Display.setTextColor(0xFFFF, 0x18E3);
-  M5.Display.setTextSize(2);
-  M5.Display.setCursor(20, 48);
-  M5.Display.print("Codex limits");
-  M5.Display.setTextSize(1);
-  M5.Display.setCursor(20, 80);
-  M5.Display.print("Reported plan: ");
-  M5.Display.println(planReported);
+  ui->setTextColor(0xFFFF, 0x18E3);
+  ui->setTextSize(2);
+  ui->setCursor(20, 48);
+  ui->print("Codex limits");
+  ui->setTextSize(1);
+  ui->setCursor(20, 80);
+  ui->print("Reported plan: ");
+  ui->println(planReported);
   if (windowCount == 0) {
-    M5.Display.setCursor(20, 110);
-    M5.Display.print("No usage window reported");
+    ui->setCursor(20, 110);
+    ui->print("No usage window reported");
   }
   for (int i = 0; i < windowCount && i < 2; ++i) {
     const int y = 106 + i * 32;
-    M5.Display.setCursor(20, y);
-    M5.Display.printf("%s: %d%% left", durationLabel(windows[i].durationMins).c_str(), windows[i].remaining);
-    M5.Display.setCursor(20, y + 13);
-    M5.Display.print(resetLabel(windows[i].resetLocal));
+    ui->setCursor(20, y);
+    ui->printf("%s: %d%% left", durationLabel(windows[i].durationMins).c_str(), windows[i].remaining);
+    ui->setCursor(20, y + 13);
+    ui->print(resetLabel(windows[i].resetLocal));
   }
-  M5.Display.setTextColor(0xBDF7, 0x0841);
-  M5.Display.setCursor(20, 174);
+  ui->setTextColor(0xBDF7, 0x0841);
+  ui->setCursor(20, 174);
   if (resetCredits >= 0) {
-    M5.Display.printf("Reset credits available: %d", resetCredits);
+    ui->printf("Reset credits available: %d", resetCredits);
   }
-  M5.Display.setCursor(20, 190);
-  M5.Display.print(codexConnected ? "Codex connected" : "Codex unavailable");
-  M5.Display.setTextColor(0xBDF7, 0x0841);
-  M5.Display.setCursor(112, 216);
-  M5.Display.print("TAP TO RETURN");
+  ui->setCursor(20, 190);
+  ui->print(codexConnected ? "Codex connected" : "Codex unavailable");
+  ui->setTextColor(0xBDF7, 0x0841);
+  ui->setCursor(112, 216);
+  ui->print("TAP TO RETURN");
 }
 
 void drawNotifications() {
-  M5.Display.fillScreen(0x0841);
-  M5.Display.setTextColor(0xFBE0, 0x0841);
-  M5.Display.setTextSize(2);
-  M5.Display.setCursor(10, 8);
-  M5.Display.printf("UPDATES %d", notificationCount);
-  M5.Display.setTextSize(1);
-  M5.Display.setCursor(163, 15);
-  M5.Display.print(notificationPaused ? "PAUSED" : "AUTO SCROLL");
-  M5.Display.fillRoundRect(280, 2, 38, 32, 5, 0xC124);
-  M5.Display.setTextColor(0xFFFF, 0xC124);
-  M5.Display.setTextSize(2);
-  M5.Display.setCursor(292, 8);
-  M5.Display.print("X");
-  M5.Display.setClipRect(0, 38, 320, 200);
+  ui->fillScreen(0x0841);
+  ui->setTextColor(0xFBE0, 0x0841);
+  ui->setTextSize(2);
+  ui->setCursor(10, 8);
+  ui->printf("UPDATES %d", notificationCount);
+  ui->setTextSize(1);
+  ui->setCursor(163, 15);
+  ui->print(notificationPaused ? "PAUSED" : "AUTO SCROLL");
+  ui->fillRoundRect(280, 2, 38, 32, 5, 0xC124);
+  ui->setTextColor(0xFFFF, 0xC124);
+  ui->setTextSize(2);
+  ui->setCursor(292, 8);
+  ui->print("X");
+  ui->setClipRect(0, 38, 320, 200);
   if (notificationItemsCount == 0) {
-    M5.Display.setTextColor(0xFFFF, 0x0841);
-    M5.Display.setTextSize(2);
-    M5.Display.setCursor(28, 105);
-    M5.Display.print("Nothing needs attention");
+    ui->setTextColor(0xFFFF, 0x0841);
+    ui->setTextSize(2);
+    ui->setCursor(28, 105);
+    ui->print("Nothing needs attention");
   }
   for (int i = 0; i < notificationItemsCount; ++i) {
     const int y = 42 + i * 112 - notificationScroll;
     if (y < -110 || y > 238) continue;
-    M5.Display.fillRoundRect(8, y, 304, 105, 8, 0x18E3);
-    M5.Display.setTextColor(0xFBE0, 0x18E3);
-    M5.Display.setTextSize(1);
-    M5.Display.setCursor(18, y + 9);
-    M5.Display.print(notificationItems[i].source);
-    M5.Display.setTextColor(0xFFFF, 0x18E3);
-    M5.Display.setTextSize(2);
-    M5.Display.setCursor(18, y + 26);
-    M5.Display.print(notificationItems[i].title.substring(0, 24));
-    M5.Display.setTextSize(1);
-    M5.Display.setCursor(18, y + 57);
-    M5.Display.print(notificationItems[i].summary.substring(0, 47));
-    M5.Display.setCursor(18, y + 73);
-    M5.Display.print(notificationItems[i].summary.substring(47, 94));
+    ui->fillRoundRect(8, y, 304, 105, 8, 0x18E3);
+    ui->setTextColor(0xFBE0, 0x18E3);
+    ui->setTextSize(1);
+    ui->setCursor(18, y + 9);
+    ui->print(notificationItems[i].source);
+    ui->setTextColor(0xFFFF, 0x18E3);
+    ui->setTextSize(2);
+    ui->setCursor(18, y + 26);
+    ui->print(notificationItems[i].title.substring(0, 24));
+    ui->setTextSize(1);
+    ui->setCursor(18, y + 57);
+    ui->print(notificationItems[i].summary.substring(0, 47));
+    ui->setCursor(18, y + 73);
+    ui->print(notificationItems[i].summary.substring(47, 94));
   }
-  M5.Display.clearClipRect();
+  ui->clearClipRect();
 }
 
 void drawActivity(const char* title, const char* subtitle, uint16_t color) {
   drawFrame();
-  M5.Display.setTextColor(color, 0x18E3);
-  M5.Display.setTextSize(3);
-  M5.Display.setCursor(20, 65);
-  M5.Display.print(title);
-  M5.Display.setTextColor(0xFFFF, 0x0841);
-  M5.Display.setTextSize(2);
-  M5.Display.setCursor(20, 165);
-  M5.Display.print(subtitle);
+  ui->setTextColor(color, 0x18E3);
+  ui->setTextSize(3);
+  ui->setCursor(20, 65);
+  ui->print(title);
+  ui->setTextColor(0xFFFF, 0x0841);
+  ui->setTextSize(2);
+  ui->setCursor(20, 165);
+  ui->print(subtitle);
   if (screenState == ScreenState::Speaking) {
-    M5.Display.fillRoundRect(228, 5, 84, 43, 9, 0xC124);
-    M5.Display.setTextColor(0xFFFF, 0xC124);
-    M5.Display.setTextSize(2);
-    M5.Display.setCursor(239, 18);
-    M5.Display.print("STOP");
+    ui->fillRoundRect(228, 5, 84, 43, 9, 0xC124);
+    ui->setTextColor(0xFFFF, 0xC124);
+    ui->setTextSize(2);
+    ui->setCursor(239, 18);
+    ui->print("STOP");
     if (replyParts > 1) {
-      M5.Display.setTextColor(0xBDF7, 0x0841);
-      M5.Display.setTextSize(1);
-      M5.Display.setCursor(20, 199);
-      M5.Display.printf("Part %d of %d", replyPart, replyParts);
+      ui->setTextColor(0xBDF7, 0x0841);
+      ui->setTextSize(1);
+      ui->setCursor(20, 199);
+      ui->printf("Part %d of %d", replyPart, replyParts);
     }
   }
 }
@@ -369,6 +374,7 @@ void render() {
     case ScreenState::Disconnected: drawActivity("Offline", "Reconnecting", 0xFBE0); break;
     case ScreenState::Error: drawActivity("Error", errorText.c_str(), 0xF800); break;
   }
+  if (uiCanvasReady) uiCanvas.pushSprite(0, 0);
 }
 
 void drawSplash() {
@@ -952,6 +958,10 @@ void setup() {
   M5.Power.setChargeCurrent(200);
   Serial.begin(115200);
   if (M5.Display.width() < M5.Display.height()) M5.Display.setRotation(M5.Display.getRotation() ^ 1);
+  uiCanvas.setColorDepth(16);
+  uiCanvasReady = uiCanvas.createSprite(M5.Display.width(), M5.Display.height()) != nullptr;
+  if (uiCanvasReady) ui = &uiCanvas;
+  else Serial.println("Off-screen display buffer unavailable");
   M5.Speaker.end();
   M5.Mic.end();
   Preferences preferences;
@@ -969,6 +979,8 @@ void setup() {
                 charging, M5.Power.getVBUSVoltage());
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
+  wifiMulti.addAP(kWifiSsid, kWifiPassword);
+  if (kWifiFallbackSsid[0]) wifiMulti.addAP(kWifiFallbackSsid, kWifiPassword);
   WiFi.begin(kWifiSsid, kWifiPassword);
   lastWifiAttemptMs = millis();
   drawSplash();
@@ -996,7 +1008,7 @@ void loop() {
   wifiWasConnected = wifiConnected;
   if (!wifiConnected) {
     if (now - lastWifiAttemptMs >= 10000) {
-      WiFi.reconnect();
+      wifiMulti.run(5000);
       lastWifiAttemptMs = now;
       Serial.println("Wi-Fi reconnecting");
     }

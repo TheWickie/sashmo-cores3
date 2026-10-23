@@ -2,6 +2,7 @@
   "bind_host": "192.168.1.10",
   "port": 8765,
   "wifi_ssid": "YOUR_WIFI_NAME",
+  "wifi_fallback_ssid": "",
   "device_token": "replace-with-a-random-secret-of-at-least-32-characters",
   "google_oauth_client_id": "",
   "google_oauth_client_secret": "",

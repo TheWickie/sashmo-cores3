@@ -4,6 +4,8 @@
 
 `firmware/Sashmo/Sashmo.ino` owns touchscreen UI, Wi-Fi, power status, microphone recording, speaker playback, and device timing. `backend/sashmo` owns the private LAN API, versioned state, Codex App Server client, local command router, optional ChatGPT plan text provider, optional Gmail metadata and Calendar workers, and speech adapters. `desktop/service_host.py` owns and restarts the backend independently of the window; `desktop/sashmo_desktop.py` is its Tkinter control panel. Codex, ChatGPT plan text, Google grants, and the optional billed OpenAI speech endpoints have separate credentials and purposes.
 
+The firmware composes each 320 × 240 UI frame in a 16-bit PSRAM canvas, then transfers the finished frame to the display. Ticker and notification scrolling no longer expose an intermediate cleared screen. If the canvas cannot be allocated, rendering falls back to direct display calls. The firmware can hold a second SSID in the generated private header and uses the same Wi-Fi password for both; the fallback name is kept in ignored local config. Reconnection scans only while disconnected. The ESP32-S3 radio supports 2.4 GHz networks only.
+
 ## Codex state
 
 The backend opens one persistent JSON-lines `codex app-server --stdio` process, initializes it, and requests `account/read` and `account/rateLimits/read`. It normalizes `rateLimitsByLimitId` first, with legacy `rateLimits` as fallback. It responds to `account/rateLimits/updated` by refreshing, and also refreshes every `codex_poll_seconds`. On failure it retains the last quota snapshot while flagging the Codex connection as stale and retrying with exponential backoff. No OAuth token or account secret is accessed directly.

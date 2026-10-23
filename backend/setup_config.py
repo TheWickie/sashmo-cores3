@@ -22,6 +22,7 @@ def main() -> None:
         "bind_host": args.host,
         "port": 8765,
         "wifi_ssid": wifi_ssid,
+        "wifi_fallback_ssid": "",
         "device_token": secrets.token_urlsafe(32),
         "codex_poll_seconds": 300,
         "usb_pulse_seconds": 30,

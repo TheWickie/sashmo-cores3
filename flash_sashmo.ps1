@@ -39,6 +39,10 @@ function C-Bytes([string]$value) {
 
 Assert-SingleLine $password 'Wi-Fi password'
 Assert-SingleLine ([string]$localConfig.wifi_ssid) 'Wi-Fi SSID'
+$fallbackSsid = [string]$localConfig.wifi_fallback_ssid
+if ($fallbackSsid.Contains("`r") -or $fallbackSsid.Contains("`n") -or $fallbackSsid.Contains([char]0)) {
+    throw 'Fallback Wi-Fi SSID must be one line.'
+}
 Assert-SingleLine ([string]$localConfig.device_token) 'Device token'
 Assert-SingleLine ([string]$localConfig.bind_host) 'Server host'
 
@@ -66,6 +70,7 @@ $wakeOnBattery = if ($null -eq $localConfig.wake_on_battery) { $false } else { [
 $lines = @(
     '#pragma once'
     ('static const char kWifiSsid[] = ' + (C-Bytes ([string]$localConfig.wifi_ssid)) + ';')
+    ('static const char kWifiFallbackSsid[] = ' + (C-Bytes $fallbackSsid) + ';')
     ('static const char kWifiPassword[] = ' + (C-Bytes $password) + ';')
     ('static const char kDeviceToken[] = ' + (C-Bytes ([string]$localConfig.device_token)) + ';')
     ('static const char kServerHost[] = ' + (C-Bytes ([string]$localConfig.bind_host)) + ';')
