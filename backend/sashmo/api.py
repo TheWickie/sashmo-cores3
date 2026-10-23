@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from .calendar_worker import CalendarWorker
+from .chatgpt_reminders import ChatGPTReminderWorker, validate_chat_url
 from .billing import BillingWorker
 from .conversation import ConversationProvider
 from .codex_tasks import CodexTaskManager
@@ -41,6 +42,7 @@ class Config:
     openai_billing_api_key_id: str = ""
     api_monthly_budget_usd: Decimal | None = None
     screen_standby_after_seconds: int = 900
+    chatgpt_reminder_chat_url: str = ""
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -68,8 +70,11 @@ class Config:
         standby = int(data.get("screen_standby_after_seconds", 900))
         if not 60 <= standby <= 3600:
             raise ValueError("Display standby delay must be 60 through 3600 seconds")
+        chat_url = str(data.get("chatgpt_reminder_chat_url") or "").strip()
+        if chat_url:
+            validate_chat_url(chat_url)
         return cls(str(host), port, token, poll, data.get("wake_word_enabled") is True,
-                   key_id, budget, standby)
+                   key_id, budget, standby, chat_url)
 
 
 def create_app(config: Config, *, start_worker: bool = True, state: StateStore | None = None,
@@ -90,6 +95,8 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
         calendar_worker = CalendarWorker(store) if start_worker else None
         billing_worker = BillingWorker(store, config.openai_billing_api_key_id,
                                        config.api_monthly_budget_usd) if start_worker else None
+        reminder_worker = (ChatGPTReminderWorker(store, config.chatgpt_reminder_chat_url)
+                           if start_worker and config.chatgpt_reminder_chat_url else None)
         if worker:
             await worker.start()
         if gmail_worker:
@@ -98,6 +105,8 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
             await calendar_worker.start()
         if billing_worker:
             await billing_worker.start()
+        if reminder_worker:
+            await reminder_worker.start()
         try:
             yield
         finally:
@@ -109,6 +118,8 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
                 await calendar_worker.stop()
             if billing_worker:
                 await billing_worker.stop()
+            if reminder_worker:
+                await reminder_worker.stop()
             await task_manager.close()
             await voice_stream.cancel()
 

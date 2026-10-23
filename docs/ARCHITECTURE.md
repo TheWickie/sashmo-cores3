@@ -43,3 +43,9 @@ The Sign in with ChatGPT implementation performs dynamic client registration, lo
 ## Service lifetime
 
 The independent Windows host starts under the current user and has a separate Run registration for Windows sign-in. It supervises one backend process, restarts crashes with backoff, and attaches without duplicating an already running service. Dashboard control uses a random capability stored in ignored `work/service-host.json` over a loopback-only socket. Closing the dashboard does not send a stop command. An explicit Stop service action stops the host and its child. Service output and host diagnostics remain in ignored local log files.
+
+## Notification display and reminder source
+
+The service assembles a bounded read-only feed from cached local alerts, Gmail metadata, Calendar events, recent Codex work titles that mention a bug or fix, and active ChatGPT Scheduled tasks. Each source has its own refresh worker; a device pulse only reads cached state. The pulse sends at most twelve title/summary cards over the authenticated Wi-Fi API. The CoreS3 scrolls their text in an idle ticker and in a full-screen reader. No Gmail body, Codex transcript, or credential is included in this feed. Unplugging USB sleeps only the display; Wi-Fi pulses and touch wake continue on battery.
+
+The optional ChatGPT reminder worker uses a separate persistent Chrome profile under the current Windows user's local app data. The user signs in once in a visible browser; subsequent checks every fifteen minutes use a headless browser to ask a dedicated ChatGPT conversation to list actual active Scheduled tasks without changing them. A failed check is marked stale; the browser chat is an account-dependent integration rather than a guaranteed API. This worker does not query ChatGPT's full notifications inbox. Its browser profile and conversation URL remain on the PC, never in firmware or the public sample config.

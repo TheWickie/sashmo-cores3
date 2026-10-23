@@ -34,6 +34,14 @@ QuotaWindow windows[2];
 int windowCount = 0;
 int resetCredits = -1;
 int notificationCount = 0;
+struct NotificationItem { String source; String title; String summary; };
+NotificationItem notificationItems[12];
+int notificationItemsCount = 0;
+int tickerIndex = 0;
+int tickerOffset = 0;
+int notificationScroll = 0;
+bool notificationPaused = false;
+uint32_t nextAnimationMs = 0;
 int mailUnreadCount = -1;
 int calendarEventCount = -1;
 String notificationTitle;
@@ -72,6 +80,7 @@ bool wakeMicActive = false;
 bool wakeRecording = false;
 uint32_t wakeRecordingStartedMs = 0;
 void stopWakeListening();
+void wakeDisplay(uint32_t now);
 
 String baseUrl() {
   return String("http://") + kServerHost + ":" + String(kServerPort);
@@ -145,82 +154,80 @@ void drawFrame() {
 }
 
 void drawIdle() {
-  drawFrame();
+  M5.Display.fillScreen(0x0841);
+  M5.Display.fillRoundRect(7, 5, 208, 69, 9, 0x18E3);
   M5.Display.setTextColor(0xBDF7, 0x18E3);
   M5.Display.setTextSize(1);
-  M5.Display.setCursor(20, 44);
-  M5.Display.print("CODEX REMAINING");
-  M5.Display.setCursor(250, 44);
-  M5.Display.print(planReported);
-
+  M5.Display.setCursor(16, 11);
+  M5.Display.print("CODEX LEFT");
   if (windowCount > 0 && windows[0].present) {
     M5.Display.setTextColor(0x7FEF, 0x18E3);
-    M5.Display.setTextSize(5);
-    M5.Display.setCursor(19, 59);
+    M5.Display.setTextSize(4);
+    M5.Display.setCursor(15, 22);
     M5.Display.printf("%d%%", windows[0].remaining);
     M5.Display.setTextSize(1);
-    M5.Display.setTextColor(0xFFFF, 0x18E3);
-    M5.Display.setCursor(214, 84);
+    M5.Display.setTextColor(0xBDF7, 0x18E3);
+    M5.Display.setCursor(115, 32);
     M5.Display.print(durationLabel(windows[0].durationMins));
-    const String reset = resetLabel(windows[0].resetLocal);
-    if (!reset.isEmpty()) {
-      M5.Display.setCursor(20, 131);
-      M5.Display.print("Resets ");
-      M5.Display.print(reset);
-    }
   } else {
-    M5.Display.setTextColor(0xFFFF, 0x18E3);
     M5.Display.setTextSize(2);
-    M5.Display.setCursor(20, 85);
-    M5.Display.print("Quota unavailable");
+    M5.Display.setCursor(15, 30);
+    M5.Display.print("--%");
   }
-
   M5.Display.setTextSize(1);
-  M5.Display.setTextColor(serverConnected ? 0x7FEF : 0xFBE0, 0x0841);
-  M5.Display.setCursor(12, 154);
-  M5.Display.print(serverConnected ? "Desktop connected" : "Desktop disconnected");
-  M5.Display.setCursor(215, 154);
-  M5.Display.print(WiFi.status() == WL_CONNECTED ? "Wi-Fi OK" : "Wi-Fi offline");
-
-  M5.Display.setTextColor(0xBDF7, 0x0841);
-  M5.Display.setCursor(12, 165);
-  if (!serverConnected) M5.Display.print("API billing offline");
-  else if (apiSpent.isEmpty()) M5.Display.print("API spending unavailable");
-  else {
-    M5.Display.print("API $");
-    M5.Display.print(apiSpent);
-    M5.Display.print(" spent");
-    if (!apiBudgetLeft.isEmpty()) {
-      M5.Display.print(" | $");
-      M5.Display.print(apiBudgetLeft);
-      M5.Display.print(" budget left");
-    }
-  }
-
-  M5.Display.setCursor(12, 224);
-  M5.Display.setTextColor(notificationCount > 0 ? 0xFBE0 : 0xBDF7, 0x0841);
-  M5.Display.printf("ALERTS %d", notificationCount);
-  M5.Display.setTextColor(0xBDF7, 0x0841);
-  M5.Display.setCursor(205, 224);
-  if (mailUnreadCount >= 0) M5.Display.printf("MAIL %d ", mailUnreadCount);
-  if (calendarEventCount >= 0) M5.Display.printf("CAL %d", calendarEventCount);
-
-  M5.Display.fillCircle(160, 194, 30, 0x25F6);
-  M5.Display.drawCircle(160, 194, 31, 0xBDF7);
-  M5.Display.setTextColor(0xFFFF, 0x25F6);
-  M5.Display.fillRoundRect(154, 178, 12, 20, 6, 0xFFFF);
-  M5.Display.drawArc(160, 187, 13, 11, 0, 180, 0xFFFF);
-  M5.Display.drawLine(160, 201, 160, 207, 0xFFFF);
-  M5.Display.drawLine(153, 207, 167, 207, 0xFFFF);
-  M5.Display.setTextColor(0xBDF7, 0x0841);
-  M5.Display.setTextSize(1);
-  M5.Display.setCursor(116, 229);
-  M5.Display.print(wakeWordEnabled && (usbPowered || kWakeOnBattery)
-                     ? "SAY HELLO SASHMO" : "TAP TO SPEAK");
-  M5.Display.fillRoundRect(220, 174, 88, 42, 8, 0x18E3);
   M5.Display.setTextColor(0xFFFF, 0x18E3);
-  M5.Display.setCursor(228, 190);
-  M5.Display.printf("VOL %d%%", volumePercent);
+  M5.Display.setCursor(114, 57);
+  M5.Display.print("TAP TO TALK");
+  M5.Display.setTextColor(0xFFFF, 0x0841);
+  M5.Display.setTextSize(2);
+  M5.Display.setCursor(227, 15);
+  M5.Display.print(clockText);
+  M5.Display.setTextSize(1);
+  M5.Display.setCursor(226, 48);
+  if (batteryLevel >= 0) M5.Display.printf("BAT %d%%%s", batteryLevel, charging ? "+" : "");
+  else M5.Display.print("BAT --");
+
+  M5.Display.fillRoundRect(7, 79, 306, 80, 10, 0x41A3);
+  M5.Display.fillRoundRect(10, 82, 300, 74, 8, 0x20A2);
+  M5.Display.setTextColor(0xFBE0, 0x20A2);
+  M5.Display.setTextSize(1);
+  M5.Display.setCursor(18, 87);
+  M5.Display.printf("UPDATES %d  <", notificationCount);
+  M5.Display.setClipRect(13, 103, 294, 48);
+  if (notificationItemsCount > 0) {
+    const NotificationItem& item = notificationItems[tickerIndex % notificationItemsCount];
+    const int x = 310 - tickerOffset;
+    M5.Display.setTextColor(0xFFE0, 0x20A2);
+    M5.Display.setTextSize(2);
+    M5.Display.setCursor(x, 106);
+    M5.Display.print(item.source + "  " + item.title);
+    M5.Display.setTextColor(0xFFFF, 0x20A2);
+    M5.Display.setTextSize(1);
+    M5.Display.setCursor(x, 132);
+    M5.Display.print(item.summary);
+  } else {
+    M5.Display.setTextColor(0xFFFF, 0x20A2);
+    M5.Display.setTextSize(2);
+    M5.Display.setCursor(30, 116);
+    M5.Display.print("No new updates");
+  }
+  M5.Display.clearClipRect();
+
+  M5.Display.setTextColor(0xBDF7, 0x0841);
+  M5.Display.setTextSize(1);
+  M5.Display.setCursor(12, 169);
+  M5.Display.printf("Wi-Fi %s    PC %s    BAT %s", WiFi.status() == WL_CONNECTED ? "OK" : "OFF",
+                    serverConnected ? "OK" : "OFF", batteryLevel >= 0 ? String(batteryLevel).c_str() : "--");
+  M5.Display.setCursor(12, 188);
+  M5.Display.printf("MAIL %s   CAL %s   VOL %d%%", mailUnreadCount >= 0 ? String(mailUnreadCount).c_str() : "--",
+                    calendarEventCount >= 0 ? String(calendarEventCount).c_str() : "--", volumePercent);
+  M5.Display.setCursor(12, 207);
+  if (!apiSpent.isEmpty()) M5.Display.printf("API $%s   ", apiSpent.c_str());
+  M5.Display.print("Tap ticker for details");
+  M5.Display.fillRoundRect(245, 213, 68, 24, 5, 0x18E3);
+  M5.Display.setTextColor(0xFFFF, 0x18E3);
+  M5.Display.setCursor(253, 221);
+  M5.Display.print("VOL +/-");
 }
 
 void drawVolume() {
@@ -282,25 +289,45 @@ void drawDetails() {
 }
 
 void drawNotifications() {
-  drawFrame();
-  M5.Display.setTextColor(0xFFFF, 0x18E3);
+  M5.Display.fillScreen(0x0841);
+  M5.Display.setTextColor(0xFBE0, 0x0841);
   M5.Display.setTextSize(2);
-  M5.Display.setCursor(20, 48);
-  M5.Display.print("Alerts");
+  M5.Display.setCursor(10, 8);
+  M5.Display.printf("UPDATES %d", notificationCount);
   M5.Display.setTextSize(1);
-  M5.Display.setCursor(20, 86);
-  M5.Display.printf("%d current alert%s", notificationCount, notificationCount == 1 ? "" : "s");
-  M5.Display.setCursor(20, 109);
-  M5.Display.print(notificationCount > 0 ? notificationTitle.substring(0, 46) : "Nothing needs attention");
-  M5.Display.setCursor(20, 125);
-  M5.Display.print(notificationSummary.substring(0, 46));
-  if (notificationSummary.length() > 46) {
-    M5.Display.setCursor(20, 140);
-    M5.Display.print(notificationSummary.substring(46, 92));
+  M5.Display.setCursor(163, 15);
+  M5.Display.print(notificationPaused ? "PAUSED" : "AUTO SCROLL");
+  M5.Display.fillRoundRect(280, 2, 38, 32, 5, 0xC124);
+  M5.Display.setTextColor(0xFFFF, 0xC124);
+  M5.Display.setTextSize(2);
+  M5.Display.setCursor(292, 8);
+  M5.Display.print("X");
+  M5.Display.setClipRect(0, 38, 320, 200);
+  if (notificationItemsCount == 0) {
+    M5.Display.setTextColor(0xFFFF, 0x0841);
+    M5.Display.setTextSize(2);
+    M5.Display.setCursor(28, 105);
+    M5.Display.print("Nothing needs attention");
   }
-  M5.Display.setTextColor(0xBDF7, 0x0841);
-  M5.Display.setCursor(112, 216);
-  M5.Display.print("TAP TO RETURN");
+  for (int i = 0; i < notificationItemsCount; ++i) {
+    const int y = 42 + i * 112 - notificationScroll;
+    if (y < -110 || y > 238) continue;
+    M5.Display.fillRoundRect(8, y, 304, 105, 8, 0x18E3);
+    M5.Display.setTextColor(0xFBE0, 0x18E3);
+    M5.Display.setTextSize(1);
+    M5.Display.setCursor(18, y + 9);
+    M5.Display.print(notificationItems[i].source);
+    M5.Display.setTextColor(0xFFFF, 0x18E3);
+    M5.Display.setTextSize(2);
+    M5.Display.setCursor(18, y + 26);
+    M5.Display.print(notificationItems[i].title.substring(0, 24));
+    M5.Display.setTextSize(1);
+    M5.Display.setCursor(18, y + 57);
+    M5.Display.print(notificationItems[i].summary.substring(0, 47));
+    M5.Display.setCursor(18, y + 73);
+    M5.Display.print(notificationItems[i].summary.substring(47, 94));
+  }
+  M5.Display.clearClipRect();
 }
 
 void drawActivity(const char* title, const char* subtitle, uint16_t color) {
@@ -372,6 +399,15 @@ void readPower() {
     dirty = true;
   }
   if (sourceChanged) nextPulseMs = millis();
+  if (sourceChanged && !nowUsb && !displaySleeping) {
+    stopWakeListening();
+    M5.Display.sleep();
+    displaySleeping = true;
+    dirty = true;
+    Serial.println("DISPLAY off on battery");
+  } else if (sourceChanged && nowUsb && displaySleeping) {
+    wakeDisplay(millis());
+  }
 }
 
 void applyPowerProfile() {
@@ -393,6 +429,7 @@ void applyPowerProfile() {
 }
 
 void updateDisplayStandby(uint32_t now) {
+  if (usbPowered) return;
   const bool activeVoice = screenState == ScreenState::Listening
                         || screenState == ScreenState::Processing
                         || screenState == ScreenState::Speaking;
@@ -478,12 +515,21 @@ void parsePulse(const String& payload) {
   }
   if (doc["notification_count"].is<int>()) {
     notificationCount = doc["notification_count"].as<int>();
+    notificationItemsCount = 0;
     notificationTitle = "";
     notificationSummary = "";
     for (JsonObject item : doc["notifications"].as<JsonArray>()) {
+      if (notificationItemsCount >= 12) break;
+      NotificationItem& target = notificationItems[notificationItemsCount++];
+      target.source = String(item["source"] | "UPDATE");
+      target.title = String(item["title"] | "");
+      target.summary = String(item["summary"] | "");
       notificationTitle = String(item["title"] | "");
       notificationSummary = String(item["summary"] | "");
     }
+    tickerIndex = 0;
+    tickerOffset = 0;
+    notificationScroll = 0;
     dirty = true;
   }
   if (doc.containsKey("gmail_unread_count")) {
@@ -811,8 +857,7 @@ void pushToTalk() {
 }
 
 void pollWakeWord(uint32_t now) {
-  const bool allowedPower = usbPowered || (kWakeOnBattery &&
-                            (batteryLevel < 0 || batteryLevel > kLowBatteryPercent));
+  const bool allowedPower = usbPowered;
   const bool shouldListen = wakeWordEnabled && allowedPower && serverConnected
                          && WiFi.status() == WL_CONNECTED
                          && screenState != ScreenState::Listening
@@ -935,13 +980,12 @@ void loop() {
   M5.update();
   const uint32_t now = millis();
 
-  if (now - lastPowerReadMs >= 15000) {
+  if (now - lastPowerReadMs >= 1000) {
     lastPowerReadMs = now;
     readPower();
     applyPowerProfile();
-    Serial.printf("POWER battery=%d%% battery_mv=%d present=%d charging=%d vbus=%d mV\n",
-                  batteryLevel, M5.Power.getBatteryVoltage(), M5.Power.Axp2101.getBatState(),
-                  charging, M5.Power.getVBUSVoltage());
+    // Power transitions should blank or restore the screen promptly. The
+    // periodic battery report comes from the authenticated Wi-Fi pulse.
   }
   const bool wifiConnected = WiFi.status() == WL_CONNECTED;
   if (wifiConnected && !wifiWasConnected) {
@@ -968,30 +1012,50 @@ void loop() {
       if (displaySleeping) {
         wakeDisplay(now);
         render();
-        if (screenState == ScreenState::Idle && touch.y >= 160
-            && touch.x >= 115 && touch.x <= 205) pushToTalk();
-        else if (screenState == ScreenState::Idle && touch.y >= 165
-                 && touch.x >= 215) setState(ScreenState::Volume);
         return;
       }
       lastInteractionMs = now;
       applyPowerProfile();
       Serial.printf("TOUCH x=%d y=%d\n", touch.x, touch.y);
-      if (screenState == ScreenState::Details || screenState == ScreenState::Notifications) {
+      if (screenState == ScreenState::Details) {
         setState(ScreenState::Idle);
+      } else if (screenState == ScreenState::Notifications) {
+        if (touch.x >= 278 && touch.y <= 38) setState(ScreenState::Idle);
+        else { notificationPaused = !notificationPaused; dirty = true; }
       } else if (screenState == ScreenState::Volume) {
         if (touch.y >= 158 && touch.x <= 150) setVolumePercent(volumePercent - 10);
         else if (touch.y >= 158 && touch.x >= 170) setVolumePercent(volumePercent + 10);
         else if (touch.y >= 34 && touch.y <= 85 && touch.x >= 220) setState(ScreenState::Idle);
-      } else if (screenState == ScreenState::Idle && touch.y >= 205 && touch.x <= 100) {
+      } else if (screenState == ScreenState::Idle && touch.y >= 79 && touch.y <= 159) {
+        notificationScroll = 0;
+        notificationPaused = false;
         setState(ScreenState::Notifications);
-      } else if (screenState == ScreenState::Idle && touch.y >= 160 && touch.x >= 115 && touch.x <= 205) {
+      } else if (screenState == ScreenState::Idle && touch.y <= 75 && touch.x <= 215) {
         pushToTalk();
-      } else if (screenState == ScreenState::Idle && touch.y >= 165 && touch.x >= 215) {
+      } else if (screenState == ScreenState::Idle && touch.y >= 210 && touch.x >= 240) {
         setState(ScreenState::Volume);
-      } else if (screenState == ScreenState::Idle && touch.y >= 34 && touch.y <= 147) {
+      } else if (screenState == ScreenState::Idle && touch.y >= 160 && touch.y < 210) {
         setState(ScreenState::Details);
       }
+    }
+  }
+  if (!displaySleeping && now >= nextAnimationMs) {
+    nextAnimationMs = now + 100;
+    if (screenState == ScreenState::Idle && notificationItemsCount > 0) {
+      tickerOffset += 3;
+      const NotificationItem& item = notificationItems[tickerIndex % notificationItemsCount];
+      const int titleWidth = 12 * (item.source.length() + item.title.length() + 2);
+      const int summaryWidth = 6 * item.summary.length();
+      if (tickerOffset > 320 + max(titleWidth, summaryWidth)) {
+        tickerOffset = 0;
+        tickerIndex = (tickerIndex + 1) % notificationItemsCount;
+      }
+      dirty = true;
+    } else if (screenState == ScreenState::Notifications && !notificationPaused
+               && notificationItemsCount > 0) {
+      notificationScroll += 1;
+      if (notificationScroll > notificationItemsCount * 112 + 190) notificationScroll = 0;
+      dirty = true;
     }
   }
   updateDisplayStandby(now);

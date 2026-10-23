@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -39,6 +40,9 @@ class StateStore:
         self.billing_as_of: datetime | None = None
         self.billing_error: str | None = "OpenAI billing monitor is not configured"
         self.notifications: list[dict[str, str]] = []
+        self.chatgpt_reminders: list[dict[str, str]] = []
+        self.chatgpt_checked_at: datetime | None = None
+        self.chatgpt_error: str | None = "Not connected"
         self.gmail_snapshot: dict[str, Any] | None = None
         self.gmail_error: str | None = "Not connected"
         self.calendar_snapshot: dict[str, Any] | None = None
@@ -71,8 +75,10 @@ class StateStore:
             "codex_connected": self.codex_connected,
             "error": self.error,
             "last_updated_local": self.last_updated_local,
-            "notification_count": len(self.notifications),
-            "notifications": self.notifications[-3:],
+            "notification_count": len(self.notification_feed()),
+            "notifications": self.notification_feed(),
+            "chatgpt_checked_at": (self.chatgpt_checked_at.astimezone().isoformat(timespec="minutes")
+                                   if self.chatgpt_checked_at else None),
             "gmail_unread_count": ((self.gmail_snapshot or {}).get("unread_count")
                                    if self.gmail_snapshot is not None and self.gmail_error is None else None),
             "calendar_event_count": (len((self.calendar_snapshot or {}).get("events") or [])
@@ -100,16 +106,14 @@ class StateStore:
                 "error": self.billing_error}
 
     def update_gmail(self, snapshot: dict[str, Any] | None, error: str | None) -> None:
-        previous_count = (self.gmail_snapshot or {}).get("unread_count")
+        previous = self.gmail_snapshot
         previous_error = self.gmail_error
-        new_count = (snapshot or {}).get("unread_count")
         if snapshot is not None:
             self.gmail_snapshot = snapshot
         elif error == "Not connected":
             self.gmail_snapshot = None
-            new_count = None
         self.gmail_error = error
-        if new_count != previous_count or error != previous_error:
+        if snapshot != previous or error != previous_error:
             self.version += 1
 
     def update_calendar(self, snapshot: dict[str, Any] | None, error: str | None) -> None:
@@ -138,9 +142,67 @@ class StateStore:
 
     def update_codex_work(self, work: list[dict[str, Any]] | None,
                           error: str | None) -> None:
+        if work is not None and work != self.codex_work:
+            self.version += 1
         if work is not None:
             self.codex_work = work
         self.codex_work_error = error
+
+    def update_chatgpt_reminders(self, reminders: list[dict[str, str]] | None,
+                                 error: str | None) -> None:
+        if reminders is not None:
+            cleaned = [{"title": str(item["title"])[:80],
+                        "schedule": str(item.get("schedule", ""))[:120]}
+                       for item in reminders[:20] if item.get("title")]
+            if cleaned != self.chatgpt_reminders or error != self.chatgpt_error:
+                self.version += 1
+            self.chatgpt_reminders = cleaned
+            self.chatgpt_checked_at = datetime.now(timezone.utc)
+        elif error != self.chatgpt_error:
+            self.version += 1
+        self.chatgpt_error = error
+
+    def notification_feed(self) -> list[dict[str, str]]:
+        """Small read-only feed for the CoreS3; no mail bodies or voice transcripts."""
+        feed = [{"key": item["key"], "source": "ALERT", "title": item["title"],
+                 "summary": item["summary"]} for item in self.notifications]
+        if self.gmail_error is None:
+            for message in (self.gmail_snapshot or {}).get("messages", [])[:5]:
+                if message.get("unread"):
+                    feed.append({"key": "mail:" + str(message.get("id", ""))[:40],
+                                 "source": "MAIL", "title": str(message.get("subject") or "Unread email")[:80],
+                                 "summary": "From " + str(message.get("from") or "unknown sender")[:100]})
+        if self.calendar_error is None:
+            for event in (self.calendar_snapshot or {}).get("events", [])[:4]:
+                start = str(event.get("start", ""))
+                feed.append({"key": "calendar:" + start[:40], "source": "CALENDAR",
+                             "title": str(event.get("title") or "Upcoming event")[:80],
+                             "summary": "Starts " + start[:35]})
+        for item in self.codex_work[:8]:
+            title = str(item.get("title", ""))
+            if re.search(r"\b(bug|bugfix|fix|fixes|fixed|error|failure|broken)\b", title, re.I):
+                feed.append({"key": "codex:" + title[:40], "source": "CODEX",
+                             "title": title[:80], "summary": "Recent Codex work; review its task for status"})
+        if self.chatgpt_checked_at and (datetime.now(timezone.utc) - self.chatgpt_checked_at).total_seconds() < 3600:
+            for item in self.chatgpt_reminders[:8]:
+                feed.append({"key": "gpt:" + item["title"][:40], "source": "GPT REMINDER",
+                             "title": item["title"], "summary": item["schedule"]})
+        elif self.chatgpt_reminders:
+            feed.append({"key": "gpt:stale", "source": "GPT", "title": "Reminder sync is stale",
+                         "summary": "Check the signed-in ChatGPT browser"})
+        # A busy inbox must not push Calendar and reminders off the device.
+        sources: dict[str, list[dict[str, str]]] = {}
+        for item in feed:
+            sources.setdefault(item["source"], []).append(item)
+        balanced: list[dict[str, str]] = []
+        while sources and len(balanced) < 12:
+            for source in list(sources):
+                balanced.append(sources[source].pop(0))
+                if not sources[source]:
+                    del sources[source]
+                if len(balanced) == 12:
+                    break
+        return balanced
 
     def notify(self, key: str, title: str, summary: str) -> None:
         """Replace one local alert by stable key; do not include credentials or transcripts."""
@@ -212,7 +274,11 @@ class StateStore:
                       "wake_detections": self.wake_detections,
                       "last_wake_local": self.last_wake_local},
             "api_billing": self.billing_pulse(),
-            "notifications": {"count": len(self.notifications), "items": self.notifications},
+            "notifications": {"count": len(self.notification_feed()), "items": self.notification_feed()},
+            "chatgpt_reminders": {"count": len(self.chatgpt_reminders),
+                                  "checked_at_local": (self.chatgpt_checked_at.astimezone().isoformat(timespec="minutes")
+                                                       if self.chatgpt_checked_at else None),
+                                  "error": self.chatgpt_error},
             "gmail": {"connected": self.gmail_snapshot is not None and self.gmail_error is None,
                       "error": self.gmail_error, "snapshot": self.gmail_snapshot},
             "calendar": {"connected": self.calendar_snapshot is not None and self.calendar_error is None,

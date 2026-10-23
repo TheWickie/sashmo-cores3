@@ -374,7 +374,7 @@ class SashmoDesktop(tk.Tk):
         self.standby_var = tk.StringVar(value=str(int(config.get("screen_standby_after_seconds", 900)) // 60))
         tk.Entry(standby_row, textvariable=self.standby_var, width=8, bg=PANEL_LIGHT, fg=TEXT,
                  insertbackground=TEXT, relief="flat", font=("Segoe UI", 11), justify="center").pack(side="right")
-        self._label(card, "Allowed range: 1–60 minutes, on USB or battery. The screen stays awake while speaking.",
+        self._label(card, "On USB the screen stays on. On battery it turns off when unplugged; a tap wakes it temporarily.",
                     9, MUTED).pack(anchor="w", padx=24)
         self.autostart_var = tk.BooleanVar(value=autostart_enabled())
         tk.Checkbutton(card, text="Keep the Sashmo backend running after Windows sign-in", variable=self.autostart_var,
@@ -416,7 +416,7 @@ class SashmoDesktop(tk.Tk):
         self._button(billing, "Save settings", self._save_settings, True).pack(anchor="w", padx=24, pady=(0, 16))
 
         self.standby_status_label = self._label(settings_body,
-            f"CoreS3 display standby: {self.standby_var.get()} minutes on USB or battery. First tap wakes it.",
+            f"USB display stays on; battery display turns off on unplug. First tap wakes it.",
             10, MUTED)
         self.standby_status_label.pack(anchor="w", pady=(18, 4))
         wake_power = "USB and battery" if config.get("wake_on_battery", False) else "USB power only"
@@ -501,7 +501,12 @@ class SashmoDesktop(tk.Tk):
 
     def _build_alerts(self) -> None:
         page = self._page("alerts")
-        self._heading(page, "Alerts", "Current read-only notifications from the local service")
+        self._heading(page, "Updates", "Mail, calendar, Codex and ChatGPT reminders sent to the CoreS3 over Wi-Fi")
+        row = tk.Frame(page, bg=BG)
+        row.pack(fill="x", pady=(0, 10))
+        self._button(row, "Connect ChatGPT reminder browser", self._connect_reminder_browser, True).pack(side="left")
+        self.reminder_sync_status = self._label(page, "ChatGPT reminder sync: waiting for service", 10, MUTED)
+        self.reminder_sync_status.pack(anchor="w", pady=(0, 12))
         self.alerts_note = self._label(page, "Waiting for service…", 11, MUTED)
         self.alerts_note.pack(anchor="w", pady=(0, 12))
         self.alerts_view = tk.Text(page, bg=PANEL, fg=TEXT, insertbackground=TEXT, relief="flat",
@@ -688,15 +693,31 @@ class SashmoDesktop(tk.Tk):
 
     def _render_alerts(self) -> None:
         alerts = (self.status or {}).get("notifications") or {}
+        reminders = (self.status or {}).get("chatgpt_reminders") or {}
+        if reminders.get("checked_at_local"):
+            sync_text = f"ChatGPT reminders: {reminders.get('count', 0)} active · checked {_local_datetime(reminders['checked_at_local'])}"
+        else:
+            sync_text = f"ChatGPT reminders: {reminders.get('error') or 'not connected'}"
+        self.reminder_sync_status.configure(text=sync_text)
         items = alerts.get("items") or []
         self.alerts_note.configure(text=f"{len(items)} current alert(s)" if self.status else
                                    "Desktop service unavailable")
-        content = "\n\n".join(f"{item.get('title') or 'Alert'}\n{item.get('summary') or ''}"
+        content = "\n\n".join(f"[{item.get('source') or 'UPDATE'}] {item.get('title') or 'Alert'}\n{item.get('summary') or ''}"
                                for item in items) if items else "Nothing needs attention."
         self.alerts_view.configure(state="normal")
         self.alerts_view.delete("1.0", "end")
         self.alerts_view.insert("1.0", content)
         self.alerts_view.configure(state="disabled")
+
+    def _connect_reminder_browser(self) -> None:
+        if not load_config().get("chatgpt_reminder_chat_url"):
+            messagebox.showerror("Sashmo reminders", "A dedicated ChatGPT chat URL has not been configured.")
+            return
+        executable = Path(sys.executable).with_name("pythonw.exe")
+        if not executable.is_file():
+            executable = Path(sys.executable)
+        subprocess.Popen([str(executable), str(DESKTOP / "connect_chatgpt_reminders.py")],
+                         cwd=str(ROOT), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
     def _refresh_accounts(self) -> None:
         def work() -> None:
@@ -1302,7 +1323,7 @@ class SashmoDesktop(tk.Tk):
                            "api_monthly_budget_usd": str(budget) if budget is not None else None})
             wake_power = "USB and battery" if load_config().get("wake_on_battery", False) else "USB power only"
             self.wake_status_label.configure(text=f"'Hello Sashmo' wake listening: {wake_power if wake_enabled else 'off'}. Recognition stays on this PC.")
-            self.standby_status_label.configure(text=f"CoreS3 display standby: {standby_minutes} minutes on USB or battery. First tap wakes it.")
+            self.standby_status_label.configure(text="USB display stays on; battery display turns off on unplug. First tap wakes it.")
             set_autostart(self.autostart_var.get())
             try:
                 managed = bool(send_service_command("status").get("managed"))
