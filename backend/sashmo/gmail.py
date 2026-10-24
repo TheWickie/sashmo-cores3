@@ -354,6 +354,7 @@ class GmailClient:
                     "subject": headers.get("subject", ""),
                     "date": headers.get("date", ""),
                     "unread": "UNREAD" in details.get("labelIds", []),
+                    "important": "IMPORTANT" in details.get("labelIds", []),
                 })
             snapshot = {"unread_count": max(0, int(label.get("messagesUnread", 0))),
                         "messages": messages, "checked_at": time.time()}

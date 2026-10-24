@@ -142,8 +142,10 @@ class IpadNotificationStore:
                 summary = _safe_text(candidate.get("summary"), 170)
                 if not title:
                     continue
-                priority = "high" if key == "battery_low" or source == "ALERT" else (
-                    "normal" if source in {"MAIL", "CALENDAR", "CODEX"} else "low")
+                priority = candidate.get("priority")
+                if priority not in PRIORITIES:
+                    priority = "high" if key == "battery_low" or source == "ALERT" else (
+                        "normal" if source in {"MAIL", "CALENDAR", "CODEX"} else "low")
                 self.items.insert(0, {"id": identifier, "source": source, "title": title,
                                       "summary": summary, "priority": priority, "read": False,
                                       "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds")})
@@ -232,7 +234,8 @@ def project_sections(state: Any, notifications: IpadNotificationStore,
                   "messages": [{"from": _safe_text(item.get("from"), 90),
                                 "subject": _safe_text(item.get("subject"), 120),
                                 "date": _safe_text(item.get("date"), 60),
-                                "unread": bool(item.get("unread"))}
+                                "unread": bool(item.get("unread")),
+                                "important": item.get("important") is True}
                                for item in (state.gmail_snapshot or {}).get("messages", [])[:8]
                                if item.get("unread")] if gmail_ok else []},
         "calendar": {"connected": calendar_ok, "error": state.calendar_error,

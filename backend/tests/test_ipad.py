@@ -118,3 +118,15 @@ def test_projection_keeps_unavailable_sources_explicit_and_does_not_invent_windo
     assert result["chatgpt"]["reminders_error"] == "Sign-in required"
     assert result["communications"]["calendar"]["connected"] is False
     assert changes(result, {name: "" for name in result})["sections"] == result
+
+
+def test_gmail_important_label_becomes_high_priority_without_mail_body():
+    state = StateStore()
+    state.update_gmail({"unread_count": 1, "messages": [{"id": "m1", "subject": "Check this",
+                        "from": "sender@example.test", "unread": True, "important": True}]}, None)
+    notifications = IpadNotificationStore()
+    notifications.ingest(state.notification_feed())
+    result = project_sections(state, notifications)
+    assert result["notifications"]["items"][0]["priority"] == "high"
+    assert result["communications"]["gmail"]["messages"][0]["important"] is True
+    assert "body" not in str(result["communications"]).lower()

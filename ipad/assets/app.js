@@ -180,7 +180,9 @@
     mail.append(element("p", "small-label", "Unread email"));
     if (!data.gmail?.connected) note(mail, `Gmail unavailable: ${data.gmail?.error || "not connected"}`, true);
     else if (!data.gmail.messages?.length) note(mail, "No unread message in the latest metadata sample.");
-    else data.gmail.messages.forEach(message => card(mail, "message-card", message.subject || "(No subject)", `${message.from || "Unknown sender"} · ${message.date || "Date unavailable"}`));
+    else data.gmail.messages.slice().sort((a, b) => Number(!!b.important) - Number(!!a.important)).forEach(message =>
+      card(mail, "message-card", `${message.important ? "Important · " : ""}${message.subject || "(No subject)"}`,
+        `${message.from || "Unknown sender"} · ${message.date || "Date unavailable"}`));
     if (data.gmail?.connected) note(mail, `${data.gmail.unread_count ?? "—"} unread reported. Message bodies are never loaded.`);
     columns.append(calendar, mail); root.append(columns);
   }

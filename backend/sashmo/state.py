@@ -171,7 +171,8 @@ class StateStore:
                 if message.get("unread"):
                     feed.append({"key": "mail:" + str(message.get("id", ""))[:40],
                                  "source": "MAIL", "title": str(message.get("subject") or "Unread email")[:80],
-                                 "summary": "From " + str(message.get("from") or "unknown sender")[:100]})
+                                 "summary": "From " + str(message.get("from") or "unknown sender")[:100],
+                                 "priority": "high" if message.get("important") is True else "normal"})
         elif self.gmail_error != "Not connected":
             unread = (self.gmail_snapshot or {}).get("unread_count")
             detail = (f"Last known: {unread} unread. " if isinstance(unread, int) else "")

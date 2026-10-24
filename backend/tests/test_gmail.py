@@ -46,7 +46,7 @@ def test_metadata_poll_is_bounded_and_does_not_request_body_or_search():
             return httpx.Response(200, json={"messages": [{"id": "abc123"}]})
         assert request.url.params["format"] == "METADATA"
         assert request.url.params.get_list("metadataHeaders") == ["From", "Subject", "Date"]
-        return httpx.Response(200, json={"labelIds": ["UNREAD"], "payload": {"headers": [
+        return httpx.Response(200, json={"labelIds": ["UNREAD", "IMPORTANT"], "payload": {"headers": [
             {"name": "From", "value": "sender@example.test"},
             {"name": "Subject", "value": "Hello"},
             {"name": "Date", "value": "Fri, 16 Oct 2026 10:00:00 GMT"},
@@ -58,7 +58,7 @@ def test_metadata_poll_is_bounded_and_does_not_request_body_or_search():
     assert snapshot["unread_count"] == 4
     assert snapshot["messages"] == [{"id": "abc123", "from": "sender@example.test",
                                       "subject": "Hello", "date": "Fri, 16 Oct 2026 10:00:00 GMT",
-                                      "unread": True}]
+                                      "unread": True, "important": True}]
     assert "Body content" not in str(snapshot)
     assert client.poll() == snapshot
     assert len(calls) == 3
