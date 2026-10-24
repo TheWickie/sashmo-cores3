@@ -355,10 +355,20 @@ class SashmoDesktop(tk.Tk):
         body_window = scroll.create_window((0, 0), window=settings_body, anchor="nw")
         settings_body.bind("<Configure>", lambda _event: scroll.configure(scrollregion=scroll.bbox("all")))
         scroll.bind("<Configure>", lambda event: scroll.itemconfigure(body_window, width=event.width))
+        config = load_config()
+        ipad_card = Card(settings_body)
+        ipad_card.pack(fill="x", pady=(0, 16))
+        self._label(ipad_card, "IPAD COMMAND CENTRE", 10, MUTED, "bold").pack(anchor="w", padx=24, pady=(18, 8))
+        self._label(ipad_card, f"Open http://{config['bind_host']}:{config.get('port', 8765)}/ipad on the iPad.",
+                    11, TEXT).pack(anchor="w", padx=24)
+        self.ipad_pairing_label = self._label(ipad_card, "Pairing code: waiting for service", 16, ACCENT, "bold")
+        self.ipad_pairing_label.pack(anchor="w", padx=24, pady=(8, 4))
+        self._label(ipad_card, "Enter this code on the iPad. It changes every ten minutes. Use only on your home Wi-Fi.",
+                    9, MUTED, wraplength=610).pack(anchor="w", padx=24, pady=(0, 18))
+
         card = Card(settings_body)
         card.pack(fill="x")
         self._label(card, "DESKTOP SERVICE", 10, MUTED, "bold").pack(anchor="w", padx=24, pady=(22, 9))
-        config = load_config()
         self.address_label = self._label(card, f"Home network: {config['bind_host']}:{config.get('port', 8765)}", 11, TEXT)
         self.address_label.pack(anchor="w", padx=24, pady=4)
         row = tk.Frame(card, bg=PANEL)
@@ -386,16 +396,6 @@ class SashmoDesktop(tk.Tk):
                        activeforeground=TEXT, font=("Segoe UI", 11), anchor="w").pack(anchor="w", padx=20, pady=(0, 5))
         self._label(card, "Off: tap the touchscreen microphone for each request; no automatic follow-up listening.",
                     9, MUTED).pack(anchor="w", padx=24, pady=(0, 12))
-
-        ipad_card = Card(settings_body)
-        ipad_card.pack(fill="x", pady=(16, 0))
-        self._label(ipad_card, "IPAD COMMAND CENTRE", 10, MUTED, "bold").pack(anchor="w", padx=24, pady=(18, 8))
-        self._label(ipad_card, f"Open http://{config['bind_host']}:{config.get('port', 8765)}/ipad on the iPad.",
-                    11, TEXT).pack(anchor="w", padx=24)
-        self.ipad_pairing_label = self._label(ipad_card, "Pairing code: waiting for service", 16, ACCENT, "bold")
-        self.ipad_pairing_label.pack(anchor="w", padx=24, pady=(8, 4))
-        self._label(ipad_card, "Enter this code on the iPad. It changes every ten minutes. Use only on your home Wi-Fi.",
-                    9, MUTED, wraplength=610).pack(anchor="w", padx=24, pady=(0, 18))
 
         note = Card(settings_body)
         note.pack(fill="x", pady=(16, 0))
