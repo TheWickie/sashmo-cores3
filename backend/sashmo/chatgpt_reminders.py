@@ -83,6 +83,8 @@ async def query_chat(chat_url: str, *, profile: Path | None = None) -> list[dict
             try:
                 await editor.wait_for(state="visible", timeout=20000)
             except Exception as exc:
+                if (await page.title()).strip().casefold().startswith("just a moment"):
+                    raise RuntimeError("background_browser_blocked") from exc
                 raise RuntimeError("ChatGPT sign-in or chat is unavailable") from exc
             responses = page.locator('[data-content-search-unit-key$=":assistant"]')
             before = await responses.count()
@@ -129,6 +131,9 @@ class ChatGPTReminderWorker:
                 self.state.update_chatgpt_reminders(await query_chat(self.chat_url), None)
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                self.state.update_chatgpt_reminders(None, "ChatGPT reminder sync unavailable")
+            except Exception as exc:
+                error = ("ChatGPT blocked the background reminder check"
+                         if isinstance(exc, RuntimeError) and str(exc) == "background_browser_blocked"
+                         else "ChatGPT reminder sync unavailable")
+                self.state.update_chatgpt_reminders(None, error)
             await asyncio.sleep(self.poll_seconds)
