@@ -17,6 +17,7 @@
   "battery_dim_after_seconds": 45,
   "screen_standby_after_seconds": 900,
   "chatgpt_reminder_chat_url": "",
+  "ipad_featured_projects": [],
   "wake_word_enabled": false,
   "wake_on_battery": false,
   "openai_billing_api_key_id": "",

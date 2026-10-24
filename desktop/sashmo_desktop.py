@@ -387,6 +387,16 @@ class SashmoDesktop(tk.Tk):
         self._label(card, "Off: tap the touchscreen microphone for each request; no automatic follow-up listening.",
                     9, MUTED).pack(anchor="w", padx=24, pady=(0, 12))
 
+        ipad_card = Card(settings_body)
+        ipad_card.pack(fill="x", pady=(16, 0))
+        self._label(ipad_card, "IPAD COMMAND CENTRE", 10, MUTED, "bold").pack(anchor="w", padx=24, pady=(18, 8))
+        self._label(ipad_card, f"Open http://{config['bind_host']}:{config.get('port', 8765)}/ipad on the iPad.",
+                    11, TEXT).pack(anchor="w", padx=24)
+        self.ipad_pairing_label = self._label(ipad_card, "Pairing code: waiting for service", 16, ACCENT, "bold")
+        self.ipad_pairing_label.pack(anchor="w", padx=24, pady=(8, 4))
+        self._label(ipad_card, "Enter this code on the iPad. It changes every ten minutes. Use only on your home Wi-Fi.",
+                    9, MUTED, wraplength=610).pack(anchor="w", padx=24, pady=(0, 18))
+
         note = Card(settings_body)
         note.pack(fill="x", pady=(16, 0))
         self._label(note, "AUDIO AND SECURITY", 10, MUTED, "bold").pack(anchor="w", padx=24, pady=(20, 8))
@@ -1164,6 +1174,7 @@ class SashmoDesktop(tk.Tk):
 
     def _render_status(self, error: str | None) -> None:
         if not self.status:
+            self.ipad_pairing_label.configure(text="Pairing code: service offline")
             self.connection_label.configure(text="Desktop service offline", fg=RED)
             self.quota_value.configure(text="—")
             self.quota_caption.configure(text="Start the service to see your allowance")
@@ -1186,6 +1197,9 @@ class SashmoDesktop(tk.Tk):
             self.diagnostic_summary.configure(text=f"Service unavailable ({error or 'no response'}). {self.last_message}")
             return
         status = self.status
+        pairing = status.get("ipad_pairing") or {}
+        self.ipad_pairing_label.configure(text=(f"Pairing code: {pairing['code']}"
+                                                if pairing.get("code") else "Pairing code: unavailable"))
         self.connection_label.configure(text="Desktop service running", fg=ACCENT)
         if self.last_message == "Starting desktop service":
             self.last_message = "Service ready"

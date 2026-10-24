@@ -16,7 +16,9 @@ Only actual reported usage windows are included. Durations and reset timestamps 
 
 ## Device API
 
-All routes require `X-Sashmo-Token` matching the random token in `config.local.json`. The device includes the token in firmware at build time. The HTTP service binds to the configured private IPv4 address.
+CoreS3 and desktop `/v1/` routes require `X-Sashmo-Token` matching the random token in `config.local.json`. The device includes the token in firmware at build time. The HTTP service binds to the configured private IPv4 address.
+
+The separate iPad surface is served from `/` and `/ipad/`. Static shell assets contain no private data. `/ipad/api/bootstrap`, `/pair`, `/updates`, `/notifications/{id}/read` and `/preferences` use a home-subnet gate and a signed HttpOnly browser cookie established with the rotating code shown only in the Windows dashboard. The iPad projection explicitly selects cached fields from the existing workers; it excludes credentials, paths, mail bodies, voice transcripts, task approval and voice endpoints. Update requests carry per-section version hashes and return 204 when nothing changed. The notification history and display preferences persist in ignored `work/ipad-notifications.json`. The CoreS3 pulse and the existing desktop API are unchanged. Browser access to the page does not grant access to `/v1/status`, `/v1/projects` or task approval.
 
 - `GET /v1/pulse?since=<version>&battery=<percent>&charging=<bool>&usb=<bool>&wifi_rssi=<dBm>`: records bounded device telemetry and always returns `version`, `time`, and `date`. When `since` differs, also returns cached quota, connection state, alert count/latest alerts, Gmail unread count and Calendar event count. Device telemetry is appended to ignored `work/battery-history.csv`; it does not trigger external polling.
 - `GET /v1/status`: returns service, Codex, device, voice, Gmail metadata, Calendar events and alert status for the Windows dashboard. It requires the token and a connection originating from the backend PC. It never returns a password, token or transcript.

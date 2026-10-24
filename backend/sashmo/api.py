@@ -6,7 +6,10 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import secrets
+import time
+import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,7 +17,8 @@ from pathlib import Path
 from decimal import Decimal, InvalidOperation
 
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from .calendar_worker import CalendarWorker
@@ -23,6 +27,7 @@ from .billing import BillingWorker
 from .conversation import ConversationProvider
 from .codex_tasks import CodexTaskManager
 from .gmail import GmailWorker
+from .ipad import IpadNotificationStore, IpadPairing, changes, project_sections
 from .projects import ProjectRegistry
 from .speech import process_audio_text, recognize_wake, split_spoken_text, synthesize_reply, validate_wav
 from .state import QuotaWorker, StateStore
@@ -43,6 +48,7 @@ class Config:
     api_monthly_budget_usd: Decimal | None = None
     screen_standby_after_seconds: int = 900
     chatgpt_reminder_chat_url: str = ""
+    ipad_featured_projects: tuple[str, ...] = ()
 
     @classmethod
     def load(cls, path: Path) -> "Config":
@@ -73,8 +79,13 @@ class Config:
         chat_url = str(data.get("chatgpt_reminder_chat_url") or "").strip()
         if chat_url:
             validate_chat_url(chat_url)
+        featured = data.get("ipad_featured_projects", [])
+        if (not isinstance(featured, list) or len(featured) > 6
+                or any(not isinstance(name, str) or not 1 <= len(name.strip()) <= 80
+                       or any(ord(char) < 32 for char in name) for name in featured)):
+            raise ValueError("Invalid iPad featured projects")
         return cls(str(host), port, token, poll, data.get("wake_word_enabled") is True,
-                   key_id, budget, standby, chat_url)
+                   key_id, budget, standby, chat_url, tuple(name.strip() for name in featured))
 
 
 def create_app(config: Config, *, start_worker: bool = True, state: StateStore | None = None,
@@ -87,6 +98,13 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
                                                           "projects.local.json", state=store,
                                                           task_manager=task_manager) if start_worker else None)
     voice_stream = VoiceStreamManager(synthesize_reply)
+    root = Path(__file__).resolve().parents[2]
+    ipad_static = root / "ipad"
+    ipad_pairing = IpadPairing(config.device_token, config.bind_host)
+    ipad_notifications = IpadNotificationStore(root / "work" / "ipad-notifications.json"
+                                               if start_worker else None)
+    ipad_registry = ProjectRegistry(root / "projects.local.json")
+    ipad_project_cache: dict[str, object] = {"at": 0.0, "data": None}
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -107,9 +125,17 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
             await billing_worker.start()
         if reminder_worker:
             await reminder_worker.start()
+        async def ingest_ipad_notifications() -> None:
+            while True:
+                ipad_notifications.ingest(store.notification_feed())
+                await asyncio.sleep(15)
+        ipad_ingest_task = asyncio.create_task(ingest_ipad_notifications()) if start_worker else None
         try:
             yield
         finally:
+            if ipad_ingest_task:
+                ipad_ingest_task.cancel()
+                await asyncio.gather(ipad_ingest_task, return_exceptions=True)
             if worker:
                 await worker.stop()
             if gmail_worker:
@@ -127,6 +153,122 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
     app.state.store = store
     app.state.task_manager = task_manager
     app.state.voice_stream = voice_stream
+    app.state.ipad_pairing = ipad_pairing
+    app.state.ipad_notifications = ipad_notifications
+
+    app.mount("/ipad/assets", StaticFiles(directory=ipad_static / "assets"), name="ipad-assets")
+
+    def ipad_peer(request: Request) -> str:
+        peer = request.client.host if request.client else ""
+        if not ipad_pairing.on_home_network(peer):
+            raise HTTPException(status_code=403, detail="Home network only")
+        return peer
+
+    def ipad_authenticated(request: Request) -> str:
+        peer = ipad_peer(request)
+        if not ipad_pairing.valid(request.cookies.get("sashmo_ipad"), peer):
+            raise HTTPException(status_code=401, detail="Pair this iPad in Sashmo")
+        return peer
+
+    def ipad_write_origin(request: Request) -> None:
+        if request.headers.get("content-type", "").split(";", 1)[0].strip() != "application/json":
+            raise HTTPException(status_code=415, detail="JSON required")
+        origin = request.headers.get("origin")
+        if origin and origin not in {f"http://{config.bind_host}:{config.port}",
+                                    f"https://{config.bind_host}:{config.port}"}:
+            raise HTTPException(status_code=403, detail="Invalid origin")
+
+    @app.get("/")
+    @app.get("/ipad")
+    @app.get("/ipad/")
+    async def ipad_home() -> FileResponse:
+        return FileResponse(ipad_static / "index.html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/ipad/manifest.webmanifest")
+    async def ipad_manifest() -> FileResponse:
+        return FileResponse(ipad_static / "manifest.webmanifest", media_type="application/manifest+json")
+
+    @app.get("/ipad/sw.js")
+    async def ipad_service_worker() -> FileResponse:
+        return FileResponse(ipad_static / "sw.js", media_type="text/javascript")
+
+    @app.get("/ipad/api/bootstrap")
+    async def ipad_bootstrap(request: Request) -> JSONResponse:
+        peer = ipad_peer(request)
+        return JSONResponse({"paired": ipad_pairing.valid(request.cookies.get("sashmo_ipad"), peer)},
+                            headers={"Cache-Control": "no-store"})
+
+    @app.post("/ipad/api/pair")
+    async def ipad_pair(request: Request) -> JSONResponse:
+        peer = ipad_peer(request)
+        ipad_write_origin(request)
+        body = await request.body()
+        if len(body) > 128:
+            raise HTTPException(status_code=413, detail="Request too large")
+        try:
+            code = json.loads(body).get("code")
+        except (ValueError, AttributeError):
+            code = None
+        if not isinstance(code, str) or not re.fullmatch(r"\d{8}", code):
+            raise HTTPException(status_code=400, detail="Enter the eight-digit code")
+        cookie = ipad_pairing.pair(code, peer)
+        if not cookie:
+            raise HTTPException(status_code=429, detail="Code incorrect or expired")
+        response = JSONResponse({"paired": True}, headers={"Cache-Control": "no-store"})
+        response.set_cookie("sashmo_ipad", cookie, max_age=30 * 86400, httponly=True,
+                            secure=request.url.scheme == "https", samesite="strict", path="/ipad")
+        return response
+
+    @app.get("/ipad/api/updates")
+    async def ipad_updates(request: Request) -> Response:
+        ipad_authenticated(request)
+        now = time.monotonic()
+        if ipad_project_cache["data"] is None or now - float(ipad_project_cache["at"]) > 60:
+            ipad_project_cache["data"] = await run_in_threadpool(ipad_registry.list_projects)
+            ipad_project_cache["at"] = now
+        ipad_notifications.ingest(store.notification_feed())
+        sections = project_sections(store, ipad_notifications, ipad_project_cache["data"],
+                                    config.ipad_featured_projects)
+        previous = {name: request.query_params.get("v_" + name, "") for name in sections}
+        payload = changes(sections, previous)
+        if not payload["sections"]:
+            return Response(status_code=204, headers={"Cache-Control": "no-store"})
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.post("/ipad/api/notifications/{identifier}/read")
+    async def ipad_mark_read(identifier: str, request: Request) -> JSONResponse:
+        ipad_authenticated(request)
+        ipad_write_origin(request)
+        if not re.fullmatch(r"[0-9a-f]{24}", identifier):
+            raise HTTPException(status_code=404, detail="Notification not found")
+        body = await request.body()
+        if len(body) > 128:
+            raise HTTPException(status_code=413, detail="Request too large")
+        try:
+            read = json.loads(body).get("read")
+        except (ValueError, AttributeError):
+            read = None
+        if not isinstance(read, bool):
+            raise HTTPException(status_code=400, detail="Read state required")
+        if not ipad_notifications.mark_read(identifier, read):
+            raise HTTPException(status_code=404, detail="Notification not found")
+        return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
+
+    @app.post("/ipad/api/preferences")
+    async def ipad_preferences(request: Request) -> JSONResponse:
+        ipad_authenticated(request)
+        ipad_write_origin(request)
+        body = await request.body()
+        if len(body) > 1024:
+            raise HTTPException(status_code=413, detail="Request too large")
+        try:
+            updates = json.loads(body)
+            if not isinstance(updates, dict):
+                raise ValueError
+            preferences = ipad_notifications.set_preferences(updates)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Invalid alert preferences") from None
+        return JSONResponse({"preferences": preferences}, headers={"Cache-Control": "no-store"})
 
     def authenticate(value: str | None) -> None:
         if not value or not secrets.compare_digest(value, config.device_token):
@@ -160,7 +302,8 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
     async def status(request: Request, x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
         authenticate(x_sashmo_token)
         local_dashboard_only(request)
-        return JSONResponse({**store.status(), "codex_task_requests": task_manager.review_status()},
+        return JSONResponse({**store.status(), "codex_task_requests": task_manager.review_status(),
+                             "ipad_pairing": ipad_pairing.current_code()},
                             headers={"Cache-Control": "no-store"})
 
     @app.post("/v1/codex-task/approve")

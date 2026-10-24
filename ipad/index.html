@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#101622">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Sashmo">
+  <link rel="manifest" href="/ipad/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/ipad/assets/sashmo-icon.png">
+  <link rel="icon" href="/ipad/assets/sashmo-icon.png">
+  <link rel="stylesheet" href="/ipad/assets/app.css">
+  <title>Sashmo Command Centre</title>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <img src="/ipad/assets/sashmo-icon.png" alt="Sashmo Labrador" class="brand-mark">
+        <div><div class="eyebrow">YOUR DESK, AT A GLANCE</div><h1>Sashmo <span>Command Centre</span></h1></div>
+      </div>
+      <div class="header-actions">
+        <div class="sync-meta"><span id="clock">--:--</span><small id="last-sync">Waiting for service</small></div>
+        <div class="connection-pill" id="connection-pill" role="status" aria-live="polite"><span class="connection-dot"></span><span id="connection-text">Connecting</span></div>
+      </div>
+    </header>
+
+    <nav class="section-nav" aria-label="Dashboard sections">
+      <a href="#codex">Codex</a><a href="#chatgpt">ChatGPT</a><a href="#development">Development</a>
+      <a href="#communications">Communications</a><a href="#system">System</a><a href="#notifications">Updates <span id="unread-badge" hidden>0</span></a>
+    </nav>
+
+    <main class="dashboard-grid" id="dashboard">
+      <section class="panel quota-panel" id="codex" aria-labelledby="codex-title">
+        <div class="panel-heading"><div><p class="kicker">WORK CAPACITY</p><h2 id="codex-title">Codex</h2></div><span class="status-tag" id="codex-tag">Checking</span></div>
+        <div id="quota-content" class="panel-content"><p class="empty-state">Waiting for reported usage…</p></div>
+        <div id="codex-sessions" class="panel-subsection"></div>
+      </section>
+
+      <section class="panel updates-panel" id="notifications" aria-labelledby="updates-title">
+        <div class="panel-heading"><div><p class="kicker">WHAT NEEDS ATTENTION</p><h2 id="updates-title">Updates</h2></div><span class="counter" id="updates-count">0</span></div>
+        <div id="updates-list" class="update-list"><p class="empty-state">Waiting for updates…</p></div>
+      </section>
+
+      <section class="panel chat-panel" id="chatgpt" aria-labelledby="chat-title">
+        <div class="panel-heading"><div><p class="kicker">SCHEDULED TASKS</p><h2 id="chat-title">ChatGPT</h2></div><span class="status-tag" id="chat-tag">Checking</span></div>
+        <div id="chat-content" class="panel-content"><p class="empty-state">Checking reminder connection…</p></div>
+      </section>
+
+      <section class="panel development-panel" id="development" aria-labelledby="development-title">
+        <div class="panel-heading"><div><p class="kicker">CURRENT WORK</p><h2 id="development-title">Development</h2></div></div>
+        <div id="development-content" class="panel-content"><p class="empty-state">Loading approved projects and Codex activity…</p></div>
+      </section>
+
+      <section class="panel communications-panel" id="communications" aria-labelledby="communications-title">
+        <div class="panel-heading"><div><p class="kicker">COMING UP & INBOX</p><h2 id="communications-title">Communications</h2></div></div>
+        <div id="communications-content" class="panel-content"><p class="empty-state">Checking Google connections…</p></div>
+      </section>
+
+      <section class="panel system-panel" id="system" aria-labelledby="system-title">
+        <div class="panel-heading"><div><p class="kicker">HEALTH & CONNECTIONS</p><h2 id="system-title">System</h2></div></div>
+        <div id="system-content" class="panel-content"><p class="empty-state">Waiting for CoreS3 status…</p></div>
+      </section>
+    </main>
+
+    <footer class="footer"><span>Sashmo stays on your home network</span><span>Private data is shown only after pairing</span></footer>
+  </div>
+
+  <dialog id="pair-dialog" class="pair-dialog">
+    <div class="pair-hero"><img src="/ipad/assets/sashmo-icon.png" alt=""><div><p class="kicker">ONE-TIME SETUP</p><h2>Pair this iPad</h2></div></div>
+    <p>On the Windows Sashmo dashboard, open <strong>Settings → iPad Command Centre</strong>. Enter the eight-digit code shown there.</p>
+    <form id="pair-form"><label for="pair-code">Pairing code</label><input id="pair-code" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" autocomplete="one-time-code" required aria-describedby="pair-error"><button type="submit">Connect to Sashmo</button></form>
+    <p id="pair-error" class="error-text" role="alert"></p>
+  </dialog>
+
+  <dialog id="settings-dialog" class="settings-dialog">
+    <form id="settings-form"><div class="dialog-heading"><h2>Display & alerts</h2><button type="button" id="close-settings" class="quiet-button" aria-label="Close settings">✕</button></div>
+      <label class="setting-row"><span>Live alert banners</span><input type="checkbox" id="live-alerts"></label>
+      <label class="setting-row"><span>Minimum alert priority</span><select id="minimum-priority"><option value="low">All updates</option><option value="normal">Normal and higher</option><option value="high">High only</option><option value="critical">Critical only</option></select></label>
+      <label class="setting-row"><span>Night-time dimming</span><input type="checkbox" id="night-dim"></label>
+      <div class="time-row"><label>Dim from <input type="time" id="night-start"></label><label>until <input type="time" id="night-end"></label></div>
+      <button type="submit">Save preferences</button><p id="settings-message" role="status"></p>
+    </form>
+  </dialog>
+
+  <button type="button" id="settings-button" class="floating-settings" aria-label="Display and alert settings" title="Display and alert settings">⚙</button>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/ipad/assets/app.js" defer></script>
+</body>
+</html>

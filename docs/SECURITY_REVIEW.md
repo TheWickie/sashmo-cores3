@@ -15,6 +15,8 @@ This review covers the current CoreS3-to-Windows link. It does not approve Andro
 
 Use Sashmo only on a trusted private LAN. Do not forward its port, bind to a public address, place it behind a public tunnel, or reuse the device token for an Android client. Keep voice capabilities read-only. The backend rejects unauthorized requests before recording device telemetry or processing audio.
 
+The iPad Command Centre adds a different, read-only browser credential. Pairing requires an eight-digit rotating code visible on the Windows dashboard. Requests must come from the configured home `/24`, and the signed cookie is HttpOnly, SameSite Strict and scoped to `/ipad`. Browser write requests check JSON content type and same-origin headers. Five failed code attempts per address pause pairing for 15 minutes. The cookie remains valid for 30 days and is signed from the existing desktop secret, so changing the device token invalidates it. This protects against casual unauthenticated LAN access, but **HTTP still exposes the pairing exchange, cookie and displayed private data to local network capture or alteration**. Do not use the iPad page on guest Wi-Fi or through a tunnel. The subnet gate is an operational boundary, not proof of identity. HTTPS with a trusted certificate and separate revocable credentials is required before remote use or background push.
+
 ## Gate before remote access or powerful actions
 
 1. Add encrypted transport with server identity verification for the CoreS3 and any remote client. Decide whether the embedded device will pin a server certificate or use another maintainable trust anchor, and test renewal before deployment.

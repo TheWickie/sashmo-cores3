@@ -34,6 +34,7 @@ def main() -> None:
         "low_battery_brightness": 45,
         "battery_dim_after_seconds": 45,
         "screen_standby_after_seconds": 900,
+        "ipad_featured_projects": [],
         "wake_word_enabled": False,
         "wake_on_battery": False,
         "low_battery_percent": 15,
