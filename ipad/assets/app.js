@@ -131,9 +131,15 @@
 
   function renderChatGPT(data) {
     const root = $("chat-content"); root.replaceChildren();
+    const conversation = data.conversation || {};
     const available = !data.reminders_error;
-    $("chat-tag").textContent = available ? "Scheduled connected" : "Unavailable";
-    $("chat-tag").classList.toggle("warn", !available);
+    $("chat-tag").textContent = conversation.ready ? "Conversation ready" : available ? "Scheduled connected" : "Unavailable";
+    $("chat-tag").classList.toggle("warn", !conversation.ready && !available);
+    if (conversation.ready) note(root, `CoreS3 voice conversation is ready with ${conversation.model || "the selected model"}.`);
+    else if (conversation.signed_in) note(root, "ChatGPT is signed in. Choose a conversation model in the Windows dashboard.", true);
+    else note(root, `Voice conversation unavailable: ${conversation.error || "Connect ChatGPT in Windows"}`, true);
+    note(root, "This panel shows status; voice conversation happens on the CoreS3.");
+    root.append(element("p", "small-label", "Scheduled tasks"));
     if (!available) note(root, `Scheduled tasks unavailable: ${data.reminders_error || "not connected"}`, true);
     else if (!data.reminders?.length) note(root, "No active scheduled tasks returned by the connected reminder chat.");
     else data.reminders.forEach(task => card(root, "event-card", task.title || "Scheduled task", task.schedule || "Schedule not provided"));

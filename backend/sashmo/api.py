@@ -37,6 +37,20 @@ from .voice_stream import VoiceStreamManager
 LOG = logging.getLogger("sashmo")
 
 
+def _ipad_chatgpt_status() -> dict[str, object]:
+    """Expose only the active local plan model state, never account identity or tokens."""
+    try:
+        from .siwc import SIWCClient, WindowsTokenStore
+        active = next((account for account in SIWCClient(WindowsTokenStore()).account_summaries()
+                       if account.get("active")), None)
+        model = active.get("model") if active else None
+        return {"signed_in": active is not None, "ready": bool(model),
+                "model": model if isinstance(model, str) else None, "error": None}
+    except Exception:
+        return {"signed_in": False, "ready": False, "model": None,
+                "error": "Account status unavailable"}
+
+
 @dataclass(frozen=True)
 class Config:
     bind_host: str
@@ -105,6 +119,7 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
                                                if start_worker else None)
     ipad_registry = ProjectRegistry(root / "projects.local.json")
     ipad_project_cache: dict[str, object] = {"at": 0.0, "data": None}
+    ipad_chatgpt_cache: dict[str, object] = {"at": 0.0, "data": None}
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -226,9 +241,12 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
         if ipad_project_cache["data"] is None or now - float(ipad_project_cache["at"]) > 60:
             ipad_project_cache["data"] = await run_in_threadpool(ipad_registry.list_projects)
             ipad_project_cache["at"] = now
+        if ipad_chatgpt_cache["data"] is None or now - float(ipad_chatgpt_cache["at"]) > 60:
+            ipad_chatgpt_cache["data"] = await run_in_threadpool(_ipad_chatgpt_status)
+            ipad_chatgpt_cache["at"] = now
         ipad_notifications.ingest(store.notification_feed())
         sections = project_sections(store, ipad_notifications, ipad_project_cache["data"],
-                                    config.ipad_featured_projects)
+                                    config.ipad_featured_projects, ipad_chatgpt_cache["data"])
         previous = {name: request.query_params.get("v_" + name, "") for name in sections}
         payload = changes(sections, previous)
         if not payload["sections"]:

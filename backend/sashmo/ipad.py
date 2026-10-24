@@ -191,7 +191,8 @@ class IpadNotificationStore:
 
 def project_sections(state: Any, notifications: IpadNotificationStore,
                      projects: dict[str, Any] | None = None,
-                     featured_projects: tuple[str, ...] = ()) -> dict[str, Any]:
+                     featured_projects: tuple[str, ...] = (),
+                     conversation_status: dict[str, Any] | None = None) -> dict[str, Any]:
     """Bounded, allowlisted dashboard data from existing cached workers."""
     projects = projects or {"projects": [], "error": "not_configured"}
     quota = state.quota or {}
@@ -216,8 +217,10 @@ def project_sections(state: Any, notifications: IpadNotificationStore,
                "reminders_error": state.chatgpt_error if not reminders_current else None,
                "checked_at": (state.chatgpt_checked_at.isoformat(timespec="seconds")
                               if state.chatgpt_checked_at else None),
+               "conversation": conversation_status or {"signed_in": False, "ready": False,
+                                                      "model": None, "error": "Account status unavailable"},
                "notifications_note": "ChatGPT inbox notifications are not available from this connection.",
-               "account_note": "Account details are not supplied by the reminder connection."}
+               "account_note": "Account email and credentials remain on the Windows PC."}
     registered = projects.get("projects") or []
     development = {"named_projects": [
         {"name": name, "status": next((project for project in registered

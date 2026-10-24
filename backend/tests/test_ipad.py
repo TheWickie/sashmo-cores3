@@ -120,6 +120,16 @@ def test_projection_keeps_unavailable_sources_explicit_and_does_not_invent_windo
     assert changes(result, {name: "" for name in result})["sections"] == result
 
 
+def test_chatgpt_conversation_status_is_separate_from_scheduled_tasks():
+    state = StateStore()
+    state.chatgpt_error = "ChatGPT blocked the background reminder check"
+    result = project_sections(state, IpadNotificationStore(), conversation_status={
+        "signed_in": True, "ready": True, "model": "gpt-6-sol", "error": None})
+    assert result["chatgpt"]["conversation"]["ready"] is True
+    assert result["chatgpt"]["conversation"]["model"] == "gpt-6-sol"
+    assert result["chatgpt"]["reminders_error"] == "ChatGPT blocked the background reminder check"
+
+
 def test_gmail_important_label_becomes_high_priority_without_mail_body():
     state = StateStore()
     state.update_gmail({"unread_count": 1, "messages": [{"id": "m1", "subject": "Check this",
