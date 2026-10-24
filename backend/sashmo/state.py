@@ -113,7 +113,7 @@ class StateStore:
         elif error == "Not connected":
             self.gmail_snapshot = None
         self.gmail_error = error
-        if snapshot != previous or error != previous_error:
+        if self.gmail_snapshot != previous or error != previous_error:
             self.version += 1
 
     def update_calendar(self, snapshot: dict[str, Any] | None, error: str | None) -> None:
@@ -172,24 +172,37 @@ class StateStore:
                     feed.append({"key": "mail:" + str(message.get("id", ""))[:40],
                                  "source": "MAIL", "title": str(message.get("subject") or "Unread email")[:80],
                                  "summary": "From " + str(message.get("from") or "unknown sender")[:100]})
+        elif self.gmail_error != "Not connected":
+            unread = (self.gmail_snapshot or {}).get("unread_count")
+            detail = (f"Last known: {unread} unread. " if isinstance(unread, int) else "")
+            feed.append({"key": "mail:stale", "source": "MAIL", "title": "Reconnect Gmail",
+                         "summary": detail + "Open Gmail in the Windows dashboard."})
         if self.calendar_error is None:
             for event in (self.calendar_snapshot or {}).get("events", [])[:4]:
                 start = str(event.get("start", ""))
                 feed.append({"key": "calendar:" + start[:40], "source": "CALENDAR",
                              "title": str(event.get("title") or "Upcoming event")[:80],
                              "summary": "Starts " + start[:35]})
+        elif self.calendar_error != "Not connected":
+            feed.append({"key": "calendar:stale", "source": "CALENDAR",
+                         "title": "Reconnect Calendar",
+                         "summary": "Upcoming events are unavailable. Open Calendar in the Windows dashboard."})
         for item in self.codex_work[:8]:
             title = str(item.get("title", ""))
             if re.search(r"\b(bug|bugfix|fix|fixes|fixed|error|failure|broken)\b", title, re.I):
                 feed.append({"key": "codex:" + title[:40], "source": "CODEX",
                              "title": title[:80], "summary": "Recent Codex work; review its task for status"})
-        if self.chatgpt_checked_at and (datetime.now(timezone.utc) - self.chatgpt_checked_at).total_seconds() < 3600:
+        if self.chatgpt_error is None and self.chatgpt_checked_at and (datetime.now(timezone.utc) - self.chatgpt_checked_at).total_seconds() < 3600:
             for item in self.chatgpt_reminders[:8]:
                 feed.append({"key": "gpt:" + item["title"][:40], "source": "GPT REMINDER",
                              "title": item["title"], "summary": item["schedule"]})
         elif self.chatgpt_reminders:
             feed.append({"key": "gpt:stale", "source": "GPT", "title": "Reminder sync is stale",
                          "summary": "Check the signed-in ChatGPT browser"})
+        elif self.chatgpt_error not in (None, "Not connected"):
+            feed.append({"key": "gpt:unavailable", "source": "GPT",
+                         "title": "Reminder sync unavailable",
+                         "summary": "Check ChatGPT connection in Windows Updates."})
         # A busy inbox must not push Calendar and reminders off the device.
         sources: dict[str, list[dict[str, str]]] = {}
         for item in feed:

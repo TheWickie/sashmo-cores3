@@ -46,3 +46,18 @@ def test_busy_mail_does_not_hide_reminders_or_calendar():
                                     for i in range(8)], None)
     sources = {item["source"] for item in state.notification_feed()}
     assert {"MAIL", "CALENDAR", "GPT REMINDER"} <= sources
+
+
+def test_expired_sources_are_shown_as_reconnect_actions_not_current_data():
+    state = StateStore()
+    state.update_gmail({"unread_count": 26, "messages": [{"id": "m1", "subject": "Private mail",
+                        "unread": True}]}, None)
+    state.update_calendar({"events": [{"title": "Private event"}]}, None)
+    state.update_gmail(None, "Gmail unavailable; reconnect in the dashboard")
+    state.update_calendar(None, "Calendar unavailable; reconnect in the dashboard")
+    state.update_chatgpt_reminders(None, "ChatGPT reminder sync unavailable")
+    feed = state.notification_feed()
+    assert {item["title"] for item in feed} == {
+        "Reconnect Gmail", "Reconnect Calendar", "Reminder sync unavailable"}
+    assert "Last known: 26 unread" in str(feed)
+    assert "Private mail" not in str(feed) and "Private event" not in str(feed)
