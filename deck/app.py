@@ -140,6 +140,11 @@ class DeckApp(tk.Tk):
                     self.cards = cards(self.status, self.settings)
                     self._render()
                     self.health.configure(text="Service connected", fg="#2ce4a0")
+                elif event[0] == "offline":
+                    self.status = {}
+                    self.cards = cards({}, self.settings)
+                    self._render()
+                    self.health.configure(text="Service unavailable", fg="#ffaf6d")
                 elif event[0] == "error":
                     self.health.configure(text=event[1], fg="#ffaf6d")
                 elif event[0] == "usb":
@@ -196,7 +201,9 @@ class DeckApp(tk.Tk):
                         self.cards = cards(snapshot, self.settings)
                         self.events.put(("state", snapshot))
                     except (OSError, ValueError, KeyError, urllib.error.HTTPError):
-                        self.events.put(("error", "Service unavailable"))
+                        self.status = {}
+                        self.cards = cards({}, self.settings)
+                        self.events.put(("offline",))
                     next_fetch = time.monotonic() + 5
                 if self.deck:
                     if self.cards != drawn_cards or self.settings["privacy"] != drawn_privacy:

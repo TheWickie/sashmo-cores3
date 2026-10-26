@@ -65,6 +65,7 @@ def _weekly(status: dict) -> str:
 
 
 def cards(status: dict, settings: dict) -> list[Card]:
+    service_available = (status.get("service") or {}).get("running") is True
     projects = settings.get("projects") or []
     chats = settings.get("chats") or []
     vscode = ((status.get("vscode") or {}).get("items") or [])[:3]
@@ -105,11 +106,11 @@ def cards(status: dict, settings: dict) -> list[Card]:
         project(0), project(1),
         Card("GMAIL", f"{unread} unread" if isinstance(unread, int) and (status.get("gmail") or {}).get("connected") else "Unavailable", "mail", "#ff7768", "url", "https://mail.google.com/mail/u/0/#inbox"),
         chat(0), codex(0),
-        Card("CODEX TASKS", f"{running} running" if (status.get("codex_sessions") or {}).get("error") is None else "Unavailable", "tasks", "#42b9ff", "status"),
+        Card("CODEX TASKS", f"{running} running" if service_available and (status.get("codex_sessions") or {}).get("error") is None else "Unavailable", "tasks", "#42b9ff", "status"),
         Card("WEEKLY", _weekly(status), "quota", "#27e3c2", "status"),
         Card("CALENDAR", f"{len(events)} upcoming" if (status.get("calendar") or {}).get("connected") else "Unavailable", "calendar", "#f6a64c", "url", "https://calendar.google.com/calendar/u/0/r"),
         chat(1), codex(1),
-        Card("ALERTS", f"{unread_alerts} new", "alerts", "#ffb450", "alerts"),
+        Card("ALERTS", f"{unread_alerts} new" if service_available else "Unavailable", "alerts", "#ffb450", "alerts"),
         Card("SASHMO", "Connected" if device_live else "Offline", "device", "#2ce4a0" if device_live else "#ff7768", "status"),
         Card("TALK", "When ready" if device_live and voice.get("state") == "idle" and not low_battery else "Offline / busy", "talk", "#44eadc", "talk"),
         chat(2), codex(2),

@@ -17,6 +17,7 @@ def test_fifteen_keys_and_actual_reported_week_only():
     assert preview(output).size == (480, 296)
     status["codex"]["quota"]["buckets"][0]["windows"].pop()
     assert cards(status, {"projects": [], "chats": []})[6].detail == "Not reported"
+    assert cards({}, {"projects": [], "chats": []})[10].detail == "Unavailable"
 
 
 def test_hid_image_reports_and_key_events():
