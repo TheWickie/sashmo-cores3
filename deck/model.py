@@ -73,9 +73,15 @@ def cards(status: dict, settings: dict) -> list[Card]:
     unread = ((status.get("gmail") or {}).get("snapshot") or {}).get("unread_count")
     events = ((status.get("calendar") or {}).get("snapshot") or {}).get("events") or []
     alerts = status.get("deck_notifications") or []
-    unread_alerts = sum(item.get("read") is False for item in alerts)
+    unread_alerts = status.get("deck_unread_count")
+    if not isinstance(unread_alerts, int) or unread_alerts < 0:
+        unread_alerts = sum(item.get("read") is False for item in alerts)
     device = status.get("device") or {}
     voice = status.get("voice") or {}
+    age = device.get("last_seen_seconds_ago")
+    device_live = isinstance(age, int) and 0 <= age <= 90
+    low_battery = (device.get("usb_powered") is False and isinstance(device.get("battery_percent"), int)
+                   and device["battery_percent"] <= 15)
 
     def project(i: int) -> Card:
         if i >= len(projects):
@@ -104,7 +110,7 @@ def cards(status: dict, settings: dict) -> list[Card]:
         Card("CALENDAR", f"{len(events)} upcoming" if (status.get("calendar") or {}).get("connected") else "Unavailable", "calendar", "#f6a64c", "url", "https://calendar.google.com/calendar/u/0/r"),
         chat(1), codex(1),
         Card("ALERTS", f"{unread_alerts} new", "alerts", "#ffb450", "alerts"),
-        Card("SASHMO", "Connected" if device.get("connected_recently") else "Offline", "device", "#2ce4a0" if device.get("connected_recently") else "#ff7768", "status"),
-        Card("TALK", "When ready" if device.get("connected_recently") and voice.get("state") == "idle" else "Offline / busy", "talk", "#44eadc", "talk"),
+        Card("SASHMO", "Connected" if device_live else "Offline", "device", "#2ce4a0" if device_live else "#ff7768", "status"),
+        Card("TALK", "When ready" if device_live and voice.get("state") == "idle" and not low_battery else "Offline / busy", "talk", "#44eadc", "talk"),
         chat(2), codex(2),
     ]

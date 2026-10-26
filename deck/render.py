@@ -30,6 +30,22 @@ def _fit(draw: ImageDraw.ImageDraw, value: str, font, width: int) -> str:
     return value.rstrip() + "…"
 
 
+def _title_lines(draw: ImageDraw.ImageDraw, value: str, font, width: int) -> list[str]:
+    words = value.split()
+    if not words:
+        return [""]
+    lines = [""]
+    for word in words:
+        candidate = (lines[-1] + " " + word).strip()
+        if draw.textbbox((0, 0), candidate, font=font)[2] <= width:
+            lines[-1] = candidate
+        elif len(lines) == 1:
+            lines.append(word)
+        else:
+            lines[-1] += " " + word
+    return [_fit(draw, line, font, width) for line in lines]
+
+
 def _rgb(hex_value: str) -> tuple[int, int, int]:
     return tuple(bytes.fromhex(hex_value.lstrip("#")))
 
@@ -98,12 +114,20 @@ def render_key(card: Card, privacy: bool = False) -> Image.Image:
         draw.text((cx-(box[2]-box[0])//2, 12*SCALE), glyph, font=icon_font, fill=accent)
     title_font = _font(9, True)
     detail_font = _font(7)
-    title = _fit(draw, card.title.upper() if not privacy else card.kind.upper(), title_font, 61*SCALE)
+    title_value = card.title.upper() if not privacy else card.kind.upper()
+    title = _fit(draw, title_value, title_font, 61*SCALE)
     detail = _fit(draw, card.detail if not privacy else "Hidden", detail_font, 60*SCALE)
-    tbox = draw.textbbox((0, 0), title, font=title_font)
-    dbox = draw.textbbox((0, 0), detail, font=detail_font)
-    draw.text((cx-(tbox[2]-tbox[0])//2, 47*SCALE), title, font=title_font, fill=(244, 249, 255))
-    draw.text((cx-(dbox[2]-dbox[0])//2, 59*SCALE), detail, font=detail_font, fill=(155, 197, 216))
+    if title != title_value and card.kind in {"project", "chat", "codex"}:
+        lines = _title_lines(draw, title_value, title_font, 61*SCALE)
+        for n, line in enumerate(lines[:2]):
+            box = draw.textbbox((0, 0), line, font=title_font)
+            draw.text((cx-(box[2]-box[0])//2, (45+n*10)*SCALE), line,
+                      font=title_font, fill=(244, 249, 255))
+    else:
+        tbox = draw.textbbox((0, 0), title, font=title_font)
+        dbox = draw.textbbox((0, 0), detail, font=detail_font)
+        draw.text((cx-(tbox[2]-tbox[0])//2, 47*SCALE), title, font=title_font, fill=(244, 249, 255))
+        draw.text((cx-(dbox[2]-dbox[0])//2, 59*SCALE), detail, font=detail_font, fill=(155, 197, 216))
     return im.resize((SIZE, SIZE), Image.Resampling.LANCZOS)
 
 

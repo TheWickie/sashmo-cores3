@@ -16,7 +16,8 @@ Calendar, ChatGPT or Codex itself.
 3. In the Deck window, choose **Settings**. Set two existing project folders,
    optionally register up to three saved ChatGPT conversation URLs, and adjust
    brightness or hide personal labels. Settings are stored in the ignored
-   `deck.local.json`. `deck.example.json` shows the format.
+   `deck.local.json`. `deck.example.json` shows the format. An optional
+   checkbox starts the Deck app at Windows sign-in.
 
 If the Elgato app remains open, the Sashmo preview works but USB control is
 disabled. USB control resumes after Elgato closes, without changing its profiles.

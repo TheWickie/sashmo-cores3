@@ -341,6 +341,7 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
                              "vscode": {"items": store.deck_vscode_work,
                                         "error": store.deck_vscode_error},
                              "deck_notifications": ipad_notifications.list_items()[:25],
+                             "deck_unread_count": ipad_notifications.unread_count(),
                              "deck_talk": deck_commands.status()},
                             headers={"Cache-Control": "no-store"})
 

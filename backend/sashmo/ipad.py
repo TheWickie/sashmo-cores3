@@ -159,6 +159,10 @@ class IpadNotificationStore:
         with self._lock:
             return [dict(item) for item in self.items[:100]]
 
+    def unread_count(self) -> int:
+        with self._lock:
+            return sum(item.get("read") is False for item in self.items)
+
     def mark_read(self, identifier: str, read: bool) -> bool:
         with self._lock:
             for item in self.items:

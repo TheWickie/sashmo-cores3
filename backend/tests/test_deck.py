@@ -44,10 +44,12 @@ def test_local_deck_status_and_talk_are_not_lan_controls():
         assert local.get("/v1/deck/status").status_code == 401
         snapshot = local.get("/v1/deck/status", headers=headers).json()
         assert snapshot["vscode"]["items"][0]["thread_id"] == "thread1"
+        assert snapshot["deck_unread_count"] == 1
         item_id = snapshot["deck_notifications"][0]["id"]
         assert local.post(f"/v1/deck/notifications/{item_id}/read", json={"read": True},
                           headers=headers).json() == {"ok": True}
         assert local.get("/v1/deck/status", headers=headers).json()["deck_notifications"][0]["read"] is True
+        assert local.get("/v1/deck/status", headers=headers).json()["deck_unread_count"] == 0
         assert local.get("/v1/pulse", headers=headers).json()["deck_remote_enabled"] is True
         issued = local.post("/v1/deck/talk", headers=headers)
         assert issued.status_code == 200

@@ -373,6 +373,8 @@ class SashmoDesktop(tk.Tk):
                     10, TEXT, wraplength=620).pack(anchor="w", padx=24)
         self._label(deck_card, "USB control starts when the Elgato app is closed. The preview works either way.",
                     9, MUTED).pack(anchor="w", padx=24, pady=(4, 8))
+        self.deck_health_label = self._label(deck_card, "Deck window: not running", 10, MUTED)
+        self.deck_health_label.pack(anchor="w", padx=24, pady=(0, 8))
         self._button(deck_card, "Open Sashmo Deck", self._open_deck, True).pack(anchor="w", padx=24, pady=(0, 16))
 
         card = Card(settings_body)
@@ -1188,6 +1190,14 @@ class SashmoDesktop(tk.Tk):
         self.after(100, self._drain_results)
 
     def _render_status(self, error: str | None) -> None:
+        try:
+            deck_health = json.loads((ROOT / "work" / "deck-driver.json").read_text(encoding="utf-8"))
+            current = time.time() - float(deck_health["updated_at"]) <= 15
+            deck_text = ("Deck: USB connected" if deck_health.get("usb_connected") else
+                         "Deck: preview only") if current else "Deck window: not running"
+        except (OSError, ValueError, KeyError, TypeError):
+            deck_text = "Deck window: not running"
+        self.deck_health_label.configure(text=deck_text)
         if not self.status:
             self.ipad_pairing_label.configure(text="Pairing code: service offline")
             self.connection_label.configure(text="Desktop service offline", fg=RED)

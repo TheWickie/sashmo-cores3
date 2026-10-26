@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -18,9 +19,35 @@ import urllib.request
 
 from PIL import ImageTk
 
+from .autostart import enabled as autostart_enabled, set_enabled as set_autostart_enabled
 from .hardware import Hardware
 from .model import Card, cards, load_settings, valid_chat_url
 from .render import jpeg_key, preview
+
+
+@contextlib.contextmanager
+def _single_instance(root: Path):
+    work = root / "work"
+    work.mkdir(parents=True, exist_ok=True)
+    stream = (work / "deck-driver.lock").open("a+b")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            if stream.seek(0, 2) == 0:
+                stream.write(b"0")
+                stream.flush()
+            stream.seek(0)
+            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        stream.close()
+        raise RuntimeError("Sashmo Deck is already open") from None
+    try:
+        yield
+    finally:
+        stream.close()
 
 
 def _request(root: Path, path: str, *, post: bool = False, payload: dict | None = None) -> dict:
@@ -127,6 +154,7 @@ class DeckApp(tk.Tk):
     def _worker(self) -> None:
         next_fetch = 0.0
         next_probe = 0.0
+        next_health = 0.0
         last_pressed = [False]*15
         drawn_cards: list[Card] = []
         drawn_privacy = None
@@ -151,6 +179,16 @@ class DeckApp(tk.Tk):
                         except OSError:
                             self.deck = None
                             self.events.put(("usb", "USB unavailable; preview active"))
+                if time.monotonic() >= next_health:
+                    health = {"pid": os.getpid(), "updated_at": time.time(),
+                              "usb_connected": self.deck is not None,
+                              "backend_connected": bool((self.status.get("service") or {}).get("running"))}
+                    path = self.project_root / "work" / "deck-driver.json"
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    temporary = path.with_suffix(".tmp")
+                    temporary.write_text(json.dumps(health), encoding="utf-8")
+                    os.replace(temporary, path)
+                    next_health = time.monotonic() + 5
                 if time.monotonic() >= next_fetch:
                     try:
                         snapshot = _request(self.project_root, "/v1/deck/status")
@@ -311,6 +349,9 @@ class DeckApp(tk.Tk):
         privacy = tk.BooleanVar(value=self.settings["privacy"])
         tk.Checkbutton(window, text="Hide personal labels on keys", variable=privacy,
                        bg="#0c1a2c", fg="white", selectcolor="#164353").pack(anchor="w", padx=18, pady=8)
+        autostart = tk.BooleanVar(value=autostart_enabled(self.project_root))
+        tk.Checkbutton(window, text="Start Sashmo Deck when I sign in to Windows", variable=autostart,
+                       bg="#0c1a2c", fg="white", selectcolor="#164353").pack(anchor="w", padx=18, pady=4)
         def save() -> None:
             try:
                 projects = [{"name": n.get().strip(), "path": p.get().strip()}
@@ -329,6 +370,7 @@ class DeckApp(tk.Tk):
                 path = self.project_root / "deck.local.json"
                 path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
                 self.settings = load_settings(self.project_root)
+                set_autostart_enabled(self.project_root, autostart.get())
                 self.cards = cards(self.status, self.settings)
                 self._render()
                 self.last_jpegs = [None]*15
@@ -350,7 +392,11 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--hardware", action="store_true", help="Use USB only if Elgato app is closed")
     args = parser.parse_args()
-    DeckApp(args.root, hardware=args.hardware).mainloop()
+    try:
+        with _single_instance(args.root):
+            DeckApp(args.root, hardware=args.hardware).mainloop()
+    except RuntimeError as exc:
+        messagebox.showinfo("Sashmo Deck", str(exc))
 
 
 if __name__ == "__main__":
