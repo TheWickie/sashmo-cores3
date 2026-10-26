@@ -25,6 +25,7 @@ from .calendar_worker import CalendarWorker
 from .chatgpt_reminders import ChatGPTReminderWorker, validate_chat_url
 from .billing import BillingWorker
 from .conversation import ConversationProvider
+from .deck_commands import DeckCommands
 from .codex_tasks import CodexTaskManager
 from .gmail import GmailWorker
 from .ipad import IpadNotificationStore, IpadPairing, changes, project_sections
@@ -112,6 +113,7 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
                                                           "projects.local.json", state=store,
                                                           task_manager=task_manager) if start_worker else None)
     voice_stream = VoiceStreamManager(synthesize_reply)
+    deck_commands = DeckCommands()
     root = Path(__file__).resolve().parents[2]
     ipad_static = root / "ipad"
     ipad_pairing = IpadPairing(config.device_token, config.bind_host)
@@ -168,6 +170,7 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
     app.state.store = store
     app.state.task_manager = task_manager
     app.state.voice_stream = voice_stream
+    app.state.deck_commands = deck_commands
     app.state.ipad_pairing = ipad_pairing
     app.state.ipad_notifications = ipad_notifications
 
@@ -307,13 +310,16 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
     @app.get("/v1/pulse")
     async def pulse(since: int = -1, battery: int | None = None, charging: bool | None = None,
                     usb: bool | None = None, screen_sleeping: bool | None = None,
-                    wifi_rssi: int | None = None,
+                    wifi_rssi: int | None = None, command_ack: int | None = None,
+                    command_result: str | None = None,
                     x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
         authenticate(x_sashmo_token)
         store.record_device(battery, charging, usb, wifi_rssi, screen_sleeping)
         return JSONResponse({**store.pulse(since), "wake_word_enabled": config.wake_word_enabled,
                              "api_billing": store.billing_pulse(),
-                             "screen_standby_after_seconds": config.screen_standby_after_seconds},
+                             "screen_standby_after_seconds": config.screen_standby_after_seconds,
+                             "deck_remote_enabled": deck_commands.fast_poll_enabled(),
+                             "deck_command": deck_commands.for_pulse(command_ack, command_result)},
                             headers={"Cache-Control": "no-store"})
 
     @app.get("/v1/status")
@@ -323,6 +329,56 @@ def create_app(config: Config, *, start_worker: bool = True, state: StateStore |
         return JSONResponse({**store.status(), "codex_task_requests": task_manager.review_status(),
                              "ipad_pairing": ipad_pairing.current_code()},
                             headers={"Cache-Control": "no-store"})
+
+    @app.get("/v1/deck/status")
+    async def deck_status(request: Request,
+                          x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
+        authenticate(x_sashmo_token)
+        local_dashboard_only(request)
+        deck_commands.note_client_poll()
+        ipad_notifications.ingest(store.notification_feed())
+        return JSONResponse({**store.status(),
+                             "vscode": {"items": store.deck_vscode_work,
+                                        "error": store.deck_vscode_error},
+                             "deck_notifications": ipad_notifications.list_items()[:25],
+                             "deck_talk": deck_commands.status()},
+                            headers={"Cache-Control": "no-store"})
+
+    @app.post("/v1/deck/notifications/{identifier}/read")
+    async def deck_mark_read(identifier: str, request: Request,
+                             x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
+        authenticate(x_sashmo_token)
+        local_dashboard_only(request)
+        if not re.fullmatch(r"[0-9a-f]{24}", identifier):
+            raise HTTPException(status_code=404, detail="Notification not found")
+        body = await request.body()
+        if len(body) > 64:
+            raise HTTPException(status_code=413, detail="Request too large")
+        try:
+            read = json.loads(body).get("read")
+        except (ValueError, AttributeError):
+            read = None
+        if not isinstance(read, bool):
+            raise HTTPException(status_code=400, detail="Read state required")
+        if not ipad_notifications.mark_read(identifier, read):
+            raise HTTPException(status_code=404, detail="Notification not found")
+        return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
+
+    @app.post("/v1/deck/talk")
+    async def deck_talk(request: Request,
+                        x_sashmo_token: str | None = Header(default=None)) -> JSONResponse:
+        authenticate(x_sashmo_token)
+        local_dashboard_only(request)
+        device = store.status()["device"]
+        age = device["last_seen_seconds_ago"]
+        low_battery = (device["usb_powered"] is False and
+                       device["battery_percent"] is not None and device["battery_percent"] <= 15)
+        ready = age is not None and age <= 90 and store.voice_state == "idle" and not low_battery
+        try:
+            issued = deck_commands.issue_talk(ready)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return JSONResponse(issued, headers={"Cache-Control": "no-store"})
 
     @app.post("/v1/codex-task/approve")
     async def approve_codex_task(request: Request,

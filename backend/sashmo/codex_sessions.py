@@ -98,6 +98,30 @@ async def recent_work(client: RpcClient, limit: int = 10) -> list[WorkSummary]:
     return summaries
 
 
+async def recent_vscode_work(client: RpcClient, limit: int = 3) -> list[WorkSummary]:
+    """Read exact VS Code thread IDs for desktop-only navigation."""
+    if not 1 <= limit <= 10:
+        raise ValueError("limit must be between 1 and 10")
+    result = await client.request("thread/list", {
+        "limit": limit, "sortKey": "recency_at", "sortDirection": "desc",
+        "sourceKinds": ["vscode"], "archived": False, "useStateDbOnly": True,
+    })
+    rows = result.get("data") if isinstance(result, dict) else None
+    if not isinstance(rows, list):
+        return []
+    found: list[WorkSummary] = []
+    for row in rows[:limit]:
+        if not isinstance(row, dict):
+            continue
+        thread_id = row.get("id")
+        if not isinstance(thread_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", thread_id):
+            continue
+        title = _safe_text(row.get("name") or row.get("preview"), 100) or "Untitled Codex task"
+        found.append(WorkSummary(thread_id, title, "vscode",
+                                 _timestamp(row.get("recencyAt") or row.get("updatedAt"))))
+    return found
+
+
 def _message_text(item: dict[str, Any]) -> str:
     if item.get("type") == "agentMessage" and item.get("phase") == "final_answer":
         return _safe_text(item.get("text"), 800)

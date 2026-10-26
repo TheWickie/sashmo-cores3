@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from sashmo.codex_sessions import recent_sessions, recent_projects, recent_work, work_excerpt
+from sashmo.codex_sessions import recent_sessions, recent_projects, recent_work, recent_vscode_work, work_excerpt
 
 
 class FakeRpc:
@@ -79,6 +79,17 @@ def test_recent_work_includes_folderless_vscode_task_by_preview():
         ("Plan a small rover", "vscode"), ("Fix dashboard", "cli")]
     assert "private" not in str(items)
     assert rpc.calls[0][1]["sourceKinds"] == ["cli", "vscode", "appServer"]
+
+
+def test_recent_vscode_uses_exact_read_only_source_and_bounded_titles():
+    rpc = FakeRpc([{"id": "thread-1", "name": "Fix search", "cwd": r"C:\private\project"},
+                   {"id": "bad/path", "name": "Skip"}])
+    items = asyncio.run(recent_vscode_work(rpc))
+    assert [(item.thread_id, item.title) for item in items] == [("thread-1", "Fix search")]
+    assert rpc.calls == [("thread/list", {"limit": 3, "sortKey": "recency_at",
+                                          "sortDirection": "desc", "sourceKinds": ["vscode"],
+                                          "archived": False, "useStateDbOnly": True})]
+    assert "private" not in str(items)
 
 
 def test_work_excerpt_only_uses_requests_and_final_answers():

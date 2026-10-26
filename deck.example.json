@@ -1,0 +1,11 @@
+{
+  "projects": [
+    {"name": "Project one", "path": "C:\\Projects\\One"},
+    {"name": "Project two", "path": "C:\\Projects\\Two"}
+  ],
+  "chats": [
+    {"title": "Saved chat", "url": "https://chatgpt.com/c/replace-with-your-id"}
+  ],
+  "brightness": 55,
+  "privacy": false
+}

@@ -57,6 +57,7 @@ String errorText;
 bool codexConnected = false;
 bool serverConnected = false;
 bool wakeWordEnabled = false;
+bool deckRemoteEnabled = false;
 bool dirty = true;
 M5Canvas uiCanvas(&M5.Display);
 lgfx::LovyanGFX* ui = &M5.Display;
@@ -75,6 +76,9 @@ uint32_t lastInteractionMs = 0;
 uint8_t appliedBrightness = 0;
 bool displaySleeping = false;
 uint32_t screenStandbyAfterSeconds = kScreenStandbyAfterSeconds;
+uint32_t lastRemoteTalkSeq = 0;
+uint32_t pendingRemoteTalkSeq = 0;
+String remoteTalkResult;
 int volumePercent = 63;
 int replyPart = 1;
 int replyParts = 1;
@@ -86,6 +90,7 @@ bool wakeRecording = false;
 uint32_t wakeRecordingStartedMs = 0;
 void stopWakeListening();
 void wakeDisplay(uint32_t now);
+void pushToTalk();
 
 String baseUrl() {
   return String("http://") + kServerHost + ":" + String(kServerPort);
@@ -460,6 +465,7 @@ void wakeDisplay(uint32_t now) {
 uint32_t pulseIntervalMs() {
   if (!usbPowered && batteryLevel >= 0 && batteryLevel <= kLowBatteryPercent)
     return kLowPowerPulseSeconds * 1000UL;
+  if (deckRemoteEnabled) return usbPowered ? 4000UL : 12000UL;
   return (usbPowered ? kUsbPulseSeconds : kBatteryPulseSeconds) * 1000UL;
 }
 
@@ -478,6 +484,7 @@ void parsePulse(const String& payload) {
       if (!enabled) stopWakeListening();
     }
   }
+  deckRemoteEnabled = doc["deck_remote_enabled"] | false;
   if (doc["screen_standby_after_seconds"].is<uint32_t>()) {
     const uint32_t seconds = doc["screen_standby_after_seconds"].as<uint32_t>();
     if (seconds >= 60 && seconds <= 3600) screenStandbyAfterSeconds = seconds;
@@ -546,6 +553,14 @@ void parsePulse(const String& payload) {
     calendarEventCount = doc["calendar_event_count"].is<int>() ? doc["calendar_event_count"].as<int>() : -1;
     dirty = true;
   }
+  if (doc["deck_command"].is<JsonObject>()) {
+    JsonObject command = doc["deck_command"].as<JsonObject>();
+    const uint32_t seq = command["seq"] | 0;
+    if (seq != 0 && String(command["kind"] | "") == "talk") {
+      if (seq == lastRemoteTalkSeq) remoteTalkResult = "started";
+      else if (pendingRemoteTalkSeq == 0) pendingRemoteTalkSeq = seq;
+    }
+  }
   snapshotVersion = newVersion;
 }
 
@@ -558,7 +573,10 @@ void fetchPulse() {
                    + "&usb=" + String(usbPowered ? 1 : 0)
                    + "&screen_sleeping=" + String(displaySleeping ? 1 : 0)
                    + "&wifi_rssi=" + String(WiFi.RSSI());
-  http.begin(url);
+  const bool sendingAck = lastRemoteTalkSeq != 0 && remoteTalkResult.length();
+  const String requestUrl = sendingAck ? url + "&command_ack=" + String(lastRemoteTalkSeq)
+      + "&command_result=" + remoteTalkResult : url;
+  http.begin(requestUrl);
   http.setTimeout(5000);
   http.addHeader("X-Sashmo-Token", kDeviceToken);
   const int status = http.GET();
@@ -567,6 +585,7 @@ void fetchPulse() {
     serverConnected = true;
     retryMs = 5000;
     parsePulse(payload);
+    if (sendingAck) remoteTalkResult = "";
     if (screenState == ScreenState::Disconnected || screenState == ScreenState::Error) setState(ScreenState::Idle);
     nextPulseMs = millis() + pulseIntervalMs();
     Serial.printf("PULSE ok version=%d windows=%d battery=%d%%\n", snapshotVersion, windowCount, batteryLevel);
@@ -968,6 +987,7 @@ void setup() {
   if (preferences.begin("sashmo", true)) {
     volumePercent = min(100, static_cast<int>(preferences.getUChar("volume", 63)));
     conversationMemory = preferences.getString("memory", "");
+    lastRemoteTalkSeq = preferences.getUInt("deckseq", 0);
     if (conversationMemory.length() > 900) conversationMemory = "";
     preferences.end();
   }
@@ -1016,6 +1036,25 @@ void loop() {
     setState(ScreenState::Disconnected);
   } else if (static_cast<int32_t>(now - nextPulseMs) >= 0) {
     fetchPulse();
+  }
+
+  if (pendingRemoteTalkSeq != 0) {
+    const uint32_t seq = pendingRemoteTalkSeq;
+    pendingRemoteTalkSeq = 0;
+    lastRemoteTalkSeq = seq;
+    const bool ready = serverConnected && screenState == ScreenState::Idle;
+    remoteTalkResult = ready ? "started" : "busy";
+    Preferences preferences;
+    if (preferences.begin("sashmo", false)) {
+      preferences.putUInt("deckseq", seq);
+      preferences.end();
+    }
+    if (ready) {
+      stopWakeListening();
+      wakeDisplay(millis());
+      pushToTalk();
+    }
+    nextPulseMs = millis();
   }
 
   if (M5.Touch.getCount()) {

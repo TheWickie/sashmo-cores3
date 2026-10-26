@@ -11,6 +11,7 @@ tools/
 work/
 .venv/
 config.local.json
+deck.local.json
 projects.local.json
 conversation.local.json
 conversation.tmp

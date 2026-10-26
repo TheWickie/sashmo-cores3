@@ -6,6 +6,13 @@ Sashmo is an open-source voice and status companion for the M5Stack CoreS3 and a
 
 The Labrador illustration in `assets/sashmo-labrador.png` is the project mascot. A small JPEG version appears briefly when the CoreS3 starts.
 
+An optional **Sashmo Deck** window and 15-key USB Stream Deck layout show the
+same cached status, open saved work, and can ask the CoreS3 to start its normal
+push-to-talk flow. Double-click `Deck.cmd` after setup, or open it from the
+Windows dashboard's Settings page. See [Sashmo Deck](docs/SASHMO_DECK.md) for
+the key map, private settings and hardware requirements. The Elgato app must
+be closed for USB control; the Windows preview is available while it runs.
+
 This is an active hardware project. Push-to-talk, quota display, battery telemetry and the dashboard work. A local ChatGPT plan sign-in and one text response succeeded; CoreS3 follow-up conversation still needs a physical test. Gmail metadata and Calendar upcoming-event connections have completed live read-only requests. See [Phase 2 status](docs/PHASE2.md) for verified behaviour and release blockers.
 
 ## Easy mode: set up with Codex

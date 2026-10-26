@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .codex_rpc import CodexAppServer
-from .codex_sessions import recent_sessions, recent_projects, recent_work
+from .codex_sessions import recent_sessions, recent_projects, recent_work, recent_vscode_work
 from .quota import normalize_quota
 
 
@@ -53,6 +53,8 @@ class StateStore:
         self.codex_projects_error: str | None = "Waiting for Codex"
         self.codex_work: list[dict[str, Any]] = []
         self.codex_work_error: str | None = "Waiting for Codex"
+        self.deck_vscode_work: list[dict[str, Any]] = []
+        self.deck_vscode_error: str | None = "Waiting for Codex"
         self.telemetry_path = telemetry_path
 
     def update(self, quota: dict[str, Any] | None, connected: bool, error: str | None) -> None:
@@ -147,6 +149,11 @@ class StateStore:
         if work is not None:
             self.codex_work = work
         self.codex_work_error = error
+
+    def update_deck_vscode(self, work: list[dict[str, Any]] | None, error: str | None) -> None:
+        if work is not None:
+            self.deck_vscode_work = work
+        self.deck_vscode_error = error
 
     def update_chatgpt_reminders(self, reminders: list[dict[str, str]] | None,
                                  error: str | None) -> None:
@@ -350,6 +357,11 @@ class QuotaWorker:
                         self.state.update_codex_work([item.as_dict() for item in work], None)
                     except (Exception, asyncio.TimeoutError):
                         self.state.update_codex_work(None, "Recent Codex work unavailable")
+                    try:
+                        vscode = await asyncio.wait_for(recent_vscode_work(rpc), timeout=30)
+                        self.state.update_deck_vscode([item.as_dict() for item in vscode], None)
+                    except (Exception, asyncio.TimeoutError):
+                        self.state.update_deck_vscode(None, "Recent VS Code work unavailable")
                     try:
                         await asyncio.wait_for(rpc.updated.wait(), timeout=self.poll_seconds)
                     except asyncio.TimeoutError:

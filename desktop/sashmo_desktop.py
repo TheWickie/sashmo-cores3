@@ -366,6 +366,15 @@ class SashmoDesktop(tk.Tk):
         self._label(ipad_card, "Enter this code on the iPad. It changes every ten minutes. Use only on your home Wi-Fi.",
                     9, MUTED, wraplength=610).pack(anchor="w", padx=24, pady=(0, 18))
 
+        deck_card = Card(settings_body)
+        deck_card.pack(fill="x", pady=(0, 16))
+        self._label(deck_card, "STREAM DECK", 10, MUTED, "bold").pack(anchor="w", padx=24, pady=(16, 8))
+        self._label(deck_card, "Open the 15-key preview and edit project folders, saved ChatGPT links, brightness and privacy.",
+                    10, TEXT, wraplength=620).pack(anchor="w", padx=24)
+        self._label(deck_card, "USB control starts when the Elgato app is closed. The preview works either way.",
+                    9, MUTED).pack(anchor="w", padx=24, pady=(4, 8))
+        self._button(deck_card, "Open Sashmo Deck", self._open_deck, True).pack(anchor="w", padx=24, pady=(0, 16))
+
         card = Card(settings_body)
         card.pack(fill="x")
         self._label(card, "DESKTOP SERVICE", 10, MUTED, "bold").pack(anchor="w", padx=24, pady=(22, 9))
@@ -1079,6 +1088,12 @@ class SashmoDesktop(tk.Tk):
             self.results.put(("action", message))
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _open_deck(self) -> None:
+        try:
+            os.startfile(str(ROOT / "Deck.cmd"))
+        except OSError:
+            messagebox.showerror("Sashmo Deck", "Could not open the Stream Deck window.")
 
     def _start_service(self) -> None:
         self.auto_service = True
